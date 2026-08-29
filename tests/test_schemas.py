@@ -51,3 +51,24 @@ def test_login_request_requires_email_and_password():
 
     with pytest.raises(ValidationError):
         LoginRequest(email="a@example.com")
+
+
+def test_forgot_password_request_requires_valid_email():
+    from app.schemas.auth import ForgotPasswordRequest
+
+    with pytest.raises(ValidationError):
+        ForgotPasswordRequest(email="not-an-email")
+
+
+def test_reset_password_request_rejects_short_password():
+    from app.schemas.auth import ResetPasswordRequest
+
+    with pytest.raises(ValidationError):
+        ResetPasswordRequest(token="abc", new_password="short")
+
+
+def test_reset_password_request_accepts_valid_data():
+    from app.schemas.auth import ResetPasswordRequest
+
+    data = ResetPasswordRequest(token="abc", new_password="longenough")
+    assert data.token == "abc"
