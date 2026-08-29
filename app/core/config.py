@@ -12,6 +12,12 @@ class Settings(BaseSettings):
     frontend_origin: str = "http://localhost:3000"
     cookie_secure: bool = False
     upload_dir: str = "uploads"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_use_tls: bool = True
 
 
 @lru_cache
