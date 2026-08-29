@@ -20,16 +20,32 @@ This project uses `uv`, not bare `pip`/`venv` — always prefix Python commands 
 Async FastAPI backend for a genealogy app: auth (register/login/me/logout)
 plus a `Member` CRUD API backing **one shared family tree** — there is no
 per-user ownership, every logged-in user reads/writes the same tree (see
-`docs/superpowers/specs/` for why). A richer `Family`/`Grant` model was
-considered and deliberately deferred; don't add fields (gender, dates,
-notes) or ownership scoping without a real UI need driving it.
+`docs/superpowers/specs/` for why). A richer `Family`/spouse/marriage
+model was considered and deliberately deferred; don't add
+relationship/ownership concepts without a real UI need driving it.
 
 **`Member` (`app/models/member.py`)** is a single self-referencing table:
 `id`, `full_name`, `parent_id -> members.id` (nullable; `NULL` = root),
-`created_at`. `app/routers/member.py`'s `GET /members/tree` walks the
-whole table in one query and reconstructs it into the `{id, name,
-children}` shape the frontend expects (`_build_tree`) — no recursive SQL,
-just a Python dict keyed by `parent_id`. `PUT /members/{id}` prevents
+`birth_year`/`death_year` (nullable ints, year-only — no day/month, real
+genealogy records rarely have more), `gender` (nullable, plain
+`String(10)`, validated only at the Pydantic layer via `Gender(str, Enum)`
+in `app/schemas/member.py` — not a native Postgres enum type, to keep
+adding a new value a plain code change), `notes` (nullable `Text`,
+unbounded — occupation and anything else not worth its own column goes
+here), `created_at`. **When assigning a `Gender` value to `Member.gender`,
+always use `payload.gender.value`, never the enum member directly** — a
+`class X(str, Enum)` member is technically a `str` instance, but relying
+on that instead of an explicit `.value` is fragile across Python versions
+and DB drivers (`create_member`/`update_member` in
+`app/routers/member.py` both do this correctly; follow that pattern for
+any new enum-backed field). `app/routers/member.py`'s `GET /members/tree`
+walks the whole table in one query and reconstructs it into the `{id,
+name, birth_year, death_year, gender, notes, children}` shape the
+frontend expects (`_build_tree`) — no recursive SQL, just a Python dict
+keyed by `parent_id`. This is the *only* read endpoint for members (no
+`GET /members/{id}`), so it deliberately returns full detail on every
+node rather than just enough to draw the tree shape — the frontend needs
+one fetch, not one-per-member-viewed. `PUT /members/{id}` prevents
 creating a cycle by walking the *proposed* new parent's ancestor chain up
 to the root and checking whether the member being updated shows up in it
 (`_is_descendant`). `DELETE /members/{id}` relies on the FK's default
