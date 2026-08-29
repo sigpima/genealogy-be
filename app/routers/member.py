@@ -1,8 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import uuid
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.marriage import Marriage
 from app.models.member import Member
@@ -17,9 +21,23 @@ from app.schemas.member import (
     SpouseInfo,
 )
 
+ALLOWED_AVATAR_CONTENT_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
+MAX_AVATAR_SIZE = 5 * 1024 * 1024
+
 router = APIRouter(
     prefix="/members", tags=["members"], dependencies=[Depends(get_current_user)]
 )
+
+
+def _delete_avatar_file(upload_dir: str, avatar_url: str | None) -> None:
+    if not avatar_url:
+        return
+    relative_path = avatar_url.removeprefix("/uploads/")
+    Path(upload_dir, relative_path).unlink(missing_ok=True)
 
 
 def _spouse_info(marriage: Marriage, spouse: Member) -> SpouseInfo:
@@ -213,3 +231,47 @@ async def update_marriage(
     await db.refresh(spouse)
     await db.refresh(marriage)
     return _spouse_info(marriage, spouse)
+
+
+@router.post("/{member_id}/avatar")
+async def upload_avatar(
+    member_id: int, file: UploadFile = File(...), db: AsyncSession = Depends(get_db)
+) -> dict[str, str]:
+    member = await db.get(Member, member_id)
+    if member is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
+
+    extension = ALLOWED_AVATAR_CONTENT_TYPES.get(file.content_type or "")
+    if extension is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="unsupported image type"
+        )
+
+    contents = await file.read()
+    if len(contents) > MAX_AVATAR_SIZE:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file too large")
+
+    settings = get_settings()
+    _delete_avatar_file(settings.upload_dir, member.avatar_url)
+
+    avatars_dir = Path(settings.upload_dir) / "avatars"
+    avatars_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{uuid.uuid4()}{extension}"
+    (avatars_dir / filename).write_bytes(contents)
+
+    avatar_url = f"/uploads/avatars/{filename}"
+    member.avatar_url = avatar_url
+    await db.commit()
+    return {"avatar_url": avatar_url}
+
+
+@router.delete("/{member_id}/avatar", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_avatar(member_id: int, db: AsyncSession = Depends(get_db)) -> None:
+    member = await db.get(Member, member_id)
+    if member is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
+
+    settings = get_settings()
+    _delete_avatar_file(settings.upload_dir, member.avatar_url)
+    member.avatar_url = None
+    await db.commit()
