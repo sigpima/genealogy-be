@@ -48,6 +48,55 @@ class MemberUpdate(BaseModel):
         return self
 
 
+class MarriageCreate(BaseModel):
+    spouse_full_name: str = Field(min_length=1)
+    spouse_birth_year: int | None = None
+    spouse_death_year: int | None = None
+    spouse_gender: Gender | None = None
+    spouse_notes: str | None = None
+    marriage_year: int | None = None
+
+    @model_validator(mode="after")
+    def _check_years(self) -> "MarriageCreate":
+        if (
+            self.spouse_birth_year is not None
+            and self.spouse_death_year is not None
+            and self.spouse_death_year < self.spouse_birth_year
+        ):
+            raise ValueError("spouse_death_year cannot be before spouse_birth_year")
+        return self
+
+
+class MarriageUpdate(BaseModel):
+    spouse_full_name: str = Field(min_length=1)
+    spouse_birth_year: int | None = None
+    spouse_death_year: int | None = None
+    spouse_gender: Gender | None = None
+    spouse_notes: str | None = None
+    marriage_year: int | None = None
+
+    @model_validator(mode="after")
+    def _check_years(self) -> "MarriageUpdate":
+        if (
+            self.spouse_birth_year is not None
+            and self.spouse_death_year is not None
+            and self.spouse_death_year < self.spouse_birth_year
+        ):
+            raise ValueError("spouse_death_year cannot be before spouse_birth_year")
+        return self
+
+
+class SpouseInfo(BaseModel):
+    marriage_id: int
+    marriage_year: int | None = None
+    id: int
+    full_name: str
+    birth_year: int | None = None
+    death_year: int | None = None
+    gender: Gender | None = None
+    notes: str | None = None
+
+
 class MemberRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -68,4 +117,5 @@ class MemberTreeNode(BaseModel):
     death_year: int | None = None
     gender: Gender | None = None
     notes: str | None = None
+    spouses: list[SpouseInfo] = []
     children: list["MemberTreeNode"] = []
