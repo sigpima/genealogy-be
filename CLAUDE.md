@@ -162,6 +162,31 @@ Note the pinned versions in `pyproject.toml`: `passlib==1.7.4` +
 `bcrypt==4.0.1` — bcrypt >=4.1 removed an attribute passlib 1.7.4 reads,
 so don't bump `bcrypt` alone without also moving off passlib.
 
+**Forgot password (`app/routers/auth.py`):** `POST /auth/forgot-password`
+**always returns the same `200` body regardless of whether the email is
+registered** — this anti-enumeration behavior is load-bearing, not
+incidental; any future change to this endpoint must preserve identical
+responses for known and unknown emails. If the email does match a user,
+a `PasswordResetToken` row (`app/models/password_reset_token.py`) is
+created — only a SHA-256 hash of the raw token is stored, the raw token
+is only ever emailed — and `app/core/email.py`'s
+`send_password_reset_email` (stdlib `smtplib`, configured via
+`Settings.smtp_*`) is called through `asyncio.to_thread` so a slow SMTP
+round-trip doesn't block the event loop. `POST /auth/reset-password`
+redeems a token exactly once (`used_at` is set the moment the password
+changes) and rejects unknown, expired, or already-used tokens with
+`400`. **`expires_at`/`used_at` are naive UTC `DateTime` columns, not
+`DateTime(timezone=True)`** — SQLite (used by every test via the
+`client` fixture) silently drops tzinfo on round-trip, which would make
+comparing against `datetime.now(timezone.utc)` raise `TypeError: can't
+compare offset-naive and offset-aware datetimes` in tests while working
+fine on real Postgres; staying naive-UTC end-to-end throughout
+`_utcnow()`, the model, and every comparison sidesteps that dialect
+mismatch entirely. Tests never send real email — they monkeypatch
+`app.routers.auth.send_password_reset_email` directly (see
+`tests/test_password_reset.py`); the one test that exercises
+`app/core/email.py` itself monkeypatches `smtplib.SMTP`.
+
 **Import-order gotcha for SQLAlchemy metadata:** `Base.metadata.create_all`
 (used in test fixtures, see `tests/conftest.py` and `tests/test_user_model.py`)
 only creates tables for models that have already been imported somewhere —
