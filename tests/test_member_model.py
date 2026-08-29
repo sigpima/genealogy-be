@@ -79,3 +79,14 @@ async def test_create_member_without_details_defaults_to_none(session):
     assert member.death_year is None
     assert member.gender is None
     assert member.notes is None
+
+
+async def test_create_member_without_avatar_defaults_to_none(session):
+    from app.models.member import Member
+
+    member = Member(full_name="No Avatar")
+    session.add(member)
+    await session.commit()
+    await session.refresh(member)
+
+    assert member.avatar_url is None
