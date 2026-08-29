@@ -1,4 +1,5 @@
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -7,15 +8,21 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 
 @pytest.fixture(autouse=True)
-def _env(monkeypatch):
+def _env(monkeypatch, tmp_path):
     monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
     monkeypatch.setenv("JWT_SECRET", "test-secret")
     monkeypatch.setenv("JWT_EXPIRE_MINUTES", "60")
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path))
     from app.core.config import get_settings
 
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+@pytest.fixture
+def upload_dir(tmp_path) -> Path:
+    return tmp_path
 
 
 @pytest.fixture

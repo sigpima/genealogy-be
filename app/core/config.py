@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60
     frontend_origin: str = "http://localhost:3000"
     cookie_secure: bool = False
+    upload_dir: str = "uploads"
 
 
 @lru_cache

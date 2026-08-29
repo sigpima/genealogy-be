@@ -45,3 +45,23 @@ def test_settings_reads_frontend_origin_and_cookie_secure_from_env(monkeypatch):
 
     assert settings.frontend_origin == "https://example.com"
     assert settings.cookie_secure is True
+
+
+def test_settings_upload_dir_defaults_to_uploads(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@localhost/db")
+    monkeypatch.setenv("JWT_SECRET", "test-secret")
+    monkeypatch.delenv("UPLOAD_DIR", raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.upload_dir == "uploads"
+
+
+def test_settings_reads_upload_dir_from_env(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@localhost/db")
+    monkeypatch.setenv("JWT_SECRET", "test-secret")
+    monkeypatch.setenv("UPLOAD_DIR", "/tmp/custom-uploads")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.upload_dir == "/tmp/custom-uploads"
