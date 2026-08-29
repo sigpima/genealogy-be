@@ -60,3 +60,45 @@ async def test_me_returns_current_user_with_valid_token(client):
 async def test_me_rejects_missing_token(client):
     response = await client.get("/auth/me")
     assert response.status_code == 401
+
+
+async def test_login_sets_httponly_cookie(client):
+    await client.post(
+        "/auth/register",
+        json={"email": "cookie@example.com", "password": "longenough", "full_name": "A B"},
+    )
+    response = await client.post(
+        "/auth/login", json={"email": "cookie@example.com", "password": "longenough"}
+    )
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "access_token=" in set_cookie
+    assert "httponly" in set_cookie.lower()
+
+
+async def test_me_succeeds_via_cookie_alone(client):
+    await client.post(
+        "/auth/register",
+        json={"email": "cookie2@example.com", "password": "longenough", "full_name": "A B"},
+    )
+    await client.post(
+        "/auth/login", json={"email": "cookie2@example.com", "password": "longenough"}
+    )
+    # httpx.AsyncClient's cookie jar carries the cookie from the login response automatically.
+    response = await client.get("/auth/me")
+    assert response.status_code == 200
+    assert response.json()["email"] == "cookie2@example.com"
+
+
+async def test_logout_clears_cookie_and_me_then_requires_header(client):
+    await client.post(
+        "/auth/register",
+        json={"email": "cookie3@example.com", "password": "longenough", "full_name": "A B"},
+    )
+    await client.post(
+        "/auth/login", json={"email": "cookie3@example.com", "password": "longenough"}
+    )
+    logout_response = await client.post("/auth/logout")
+    assert logout_response.status_code == 200
+
+    response = await client.get("/auth/me")
+    assert response.status_code == 401
