@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.routers.auth import router as auth_router
+from app.routers.member import router as member_router
 
 settings = get_settings()
 
@@ -18,6 +19,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(member_router)
 
 
 @app.exception_handler(Exception)
