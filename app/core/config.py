@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     database_url: str
     jwt_secret: str
     jwt_expire_minutes: int = 60
+    frontend_origin: str = "http://localhost:3000"
+    cookie_secure: bool = False
 
 
 @lru_cache
