@@ -10,16 +10,52 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Run a single test file: `uv run pytest tests/test_auth.py -v`
 - Run a single test: `uv run pytest tests/test_auth.py::test_login_rejects_wrong_password -v`
 - Apply migrations: `uv run alembic upgrade head`
-- Create a new migration (requires a live Postgres reachable via `DATABASE_URL`, since autogenerate diffs against it): `uv run alembic revision --autogenerate -m "message"`
+- Create a new migration (requires a live Postgres reachable via `DATABASE_URL`, already at `head` for existing migrations — autogenerate diffs against its current state, not from scratch): `uv run alembic revision --autogenerate -m "message"`
+- Seed the shared family tree from a `{name, children}` JSON file: `uv run python scripts/seed_members.py path/to/tree.json`
 
 This project uses `uv`, not bare `pip`/`venv` — always prefix Python commands with `uv run`.
 
 ## Architecture
 
-Async FastAPI backend for a genealogy app, currently scoped to **auth only**
-(register/login/me). Member/Family/Grant data model is an intentionally
-separate, not-yet-built phase — see `docs/superpowers/specs/` for the design
-history and rationale before adding it.
+Async FastAPI backend for a genealogy app: auth (register/login/me/logout)
+plus a `Member` CRUD API backing **one shared family tree** — there is no
+per-user ownership, every logged-in user reads/writes the same tree (see
+`docs/superpowers/specs/` for why). A richer `Family`/`Grant` model was
+considered and deliberately deferred; don't add fields (gender, dates,
+notes) or ownership scoping without a real UI need driving it.
+
+**`Member` (`app/models/member.py`)** is a single self-referencing table:
+`id`, `full_name`, `parent_id -> members.id` (nullable; `NULL` = root),
+`created_at`. `app/routers/member.py`'s `GET /members/tree` walks the
+whole table in one query and reconstructs it into the `{id, name,
+children}` shape the frontend expects (`_build_tree`) — no recursive SQL,
+just a Python dict keyed by `parent_id`. `PUT /members/{id}` prevents
+creating a cycle by walking the *proposed* new parent's ancestor chain up
+to the root and checking whether the member being updated shows up in it
+(`_is_descendant`). `DELETE /members/{id}` relies on the FK's default
+`RESTRICT` behavior — deleting a member that others reference as
+`parent_id` raises `IntegrityError`, caught and turned into a 409; there
+is no cascading delete, and none should be added without an explicit
+product decision to allow it. All `/members/*` routes require auth via
+the router-level `dependencies=[Depends(get_current_user)]`.
+
+**Adding any new model requires updating `alembic/env.py`'s import
+line**, not just creating the model file — `target_metadata = Base.metadata`
+only knows about models that have actually been imported somewhere, and
+`env.py`'s `from app.models import member, user` is what does that for
+Alembic specifically (see the `Base.metadata.create_all` gotcha below,
+which is the same underlying issue). Forgetting this makes
+`alembic revision --autogenerate` silently generate an **empty**
+migration instead of erroring — always open the generated file and
+confirm it actually contains the expected `op.create_table(...)`.
+
+**`scripts/seed_members.py`** is a one-off data loader (not an Alembic
+migration — migrations manage schema, this loads data), used to import
+`genealogy-web`'s static `new_treeData.json` into the `members` table. It
+prepends `os.getcwd()` to `sys.path` the same way `alembic/env.py` does,
+since running `python scripts/seed_members.py` otherwise puts `scripts/`
+itself on `sys.path` rather than the project root, breaking the `app.*`
+imports.
 
 **Two database engines, deliberately separate:**
 - The app itself uses SQLAlchemy 2.0 **async** (`asyncpg` driver) via
@@ -92,3 +128,13 @@ overrides the `get_db` FastAPI dependency with a fresh in-memory SQLite
 (autouse) points `DATABASE_URL` at SQLite for the duration of the test.
 `asyncio_mode = "auto"` is set in `pyproject.toml`, so async test functions
 and fixtures don't need `@pytest.mark.asyncio`.
+
+**SQLite does not enforce foreign keys by default** — `tests/conftest.py`'s
+`client` fixture registers a `connect` event listener that runs
+`PRAGMA foreign_keys=ON` on every new connection. Without it, tests
+relying on FK-triggered behavior (e.g. `Member` delete-with-children
+returning 409 via `IntegrityError`) would silently pass for the wrong
+reason: SQLite would just allow the delete, and the code path that
+catches `IntegrityError` would never actually run. Any new test fixture
+that spins up its own SQLite engine and exercises FK-dependent behavior
+needs the same event listener.
