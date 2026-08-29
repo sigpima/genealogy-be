@@ -101,3 +101,61 @@ async def test_delete_rejects_member_with_children(client):
 async def test_member_endpoints_require_auth(client):
     response = await client.get("/members/tree")
     assert response.status_code == 401
+
+
+async def test_create_and_fetch_member_with_details(client):
+    await _authenticate(client)
+    response = await client.post(
+        "/members",
+        json={
+            "full_name": "Detailed",
+            "parent_id": None,
+            "birth_year": 1950,
+            "death_year": 2010,
+            "gender": "male",
+            "notes": "Some notes",
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["birth_year"] == 1950
+    assert body["gender"] == "male"
+
+    tree_response = await client.get("/members/tree")
+    tree = tree_response.json()
+    assert tree["birth_year"] == 1950
+    assert tree["death_year"] == 2010
+    assert tree["gender"] == "male"
+    assert tree["notes"] == "Some notes"
+
+
+async def test_update_member_details(client):
+    await _authenticate(client)
+    created = await client.post("/members", json={"full_name": "Original", "parent_id": None})
+    member_id = created.json()["id"]
+
+    response = await client.put(
+        f"/members/{member_id}",
+        json={
+            "full_name": "Original",
+            "parent_id": None,
+            "birth_year": 1900,
+            "death_year": 1980,
+            "gender": "female",
+            "notes": "updated notes",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["birth_year"] == 1900
+    assert body["gender"] == "female"
+    assert body["notes"] == "updated notes"
+
+
+async def test_create_rejects_death_before_birth(client):
+    await _authenticate(client)
+    response = await client.post(
+        "/members",
+        json={"full_name": "Bad Dates", "birth_year": 2010, "death_year": 1950},
+    )
+    assert response.status_code == 422

@@ -27,6 +27,10 @@ def _build_tree(members: list[Member]) -> MemberTreeNode | None:
         return MemberTreeNode(
             id=node.id,
             name=node.full_name,
+            birth_year=node.birth_year,
+            death_year=node.death_year,
+            gender=node.gender,
+            notes=node.notes,
             children=[build(child) for child in children_by_parent.get(node.id, [])],
         )
 
@@ -58,7 +62,14 @@ async def create_member(payload: MemberCreate, db: AsyncSession = Depends(get_db
         if parent is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="parent not found")
 
-    member = Member(full_name=payload.full_name, parent_id=payload.parent_id)
+    member = Member(
+        full_name=payload.full_name,
+        parent_id=payload.parent_id,
+        birth_year=payload.birth_year,
+        death_year=payload.death_year,
+        gender=payload.gender.value if payload.gender is not None else None,
+        notes=payload.notes,
+    )
     db.add(member)
     await db.commit()
     await db.refresh(member)
@@ -90,6 +101,10 @@ async def update_member(
 
     member.full_name = payload.full_name
     member.parent_id = payload.parent_id
+    member.birth_year = payload.birth_year
+    member.death_year = payload.death_year
+    member.gender = payload.gender.value if payload.gender is not None else None
+    member.notes = payload.notes
     await db.commit()
     await db.refresh(member)
     return member
