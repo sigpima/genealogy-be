@@ -15,6 +15,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This project uses `uv`, not bare `pip`/`venv` — always prefix Python commands with `uv run`.
 
+**Docker:** `Dockerfile` here builds a standalone production image (multi-stage,
+`uv`-installed venv copied into a slim runtime image); its `CMD` runs `alembic
+upgrade head` before starting `uvicorn`, so schema migrations are automatic on
+every container start. It's normally run via the sibling `../docker-compose.yml`
+(see `../DOCKER.md`), not built standalone — that compose file wires this
+service to a Postgres container and to `genealogy-web`.
+
 ## Architecture
 
 Async FastAPI backend for a genealogy app: auth (register/login/me/logout)
