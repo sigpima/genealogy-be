@@ -31,11 +31,23 @@ history and rationale before adding it.
 
 **Settings (`app/core/config.py`)** are read once via `get_settings()`
 (`@lru_cache`-wrapped) from `.env` / environment: `DATABASE_URL`,
-`JWT_SECRET`, `JWT_EXPIRE_MINUTES`. Never hardcode these — this replaced a
-legacy Spring Boot backend that had a hardcoded JWT secret and a committed
-plaintext DB password, and that mistake shouldn't recur.
-Tests call `get_settings.cache_clear()` after monkeypatching env vars,
-since the cache would otherwise leak stale settings between tests.
+`JWT_SECRET`, `JWT_EXPIRE_MINUTES`, `FRONTEND_ORIGIN`, `COOKIE_SECURE`.
+Never hardcode these — this replaced a legacy Spring Boot backend that had
+a hardcoded JWT secret and a committed plaintext DB password, and that
+mistake shouldn't recur. Tests call `get_settings.cache_clear()` after
+monkeypatching env vars, since the cache would otherwise leak stale
+settings between tests.
+
+**`app/main.py` calls `get_settings()` at module import time** (to build
+`CORSMiddleware`'s `allow_origins` when the `FastAPI` app object is
+constructed — middleware config isn't a per-request `Depends`, it's fixed
+once at app-construction time). This is only safe because every test that
+imports `app.main` does so inside a test function body, and
+`tests/conftest.py`'s `_env` fixture (`autouse=True`) always sets
+`DATABASE_URL`/`JWT_SECRET` before any test body runs. Don't move an
+`import app.main` (or `from app.main import ...`) to module top-level in a
+test file — that would import it before `_env` has a chance to set env
+vars.
 
 **Request/response boundary rule:** every endpoint accepts/returns a
 Pydantic schema (`app/schemas/`), never a raw SQLAlchemy model
@@ -46,8 +58,14 @@ response body.
 **Auth flow (`app/routers/auth.py`):** `hash_password`/`verify_password`
 (passlib+bcrypt) and `create_access_token`/`decode_access_token`
 (python-jose, HS256) live in `app/core/security.py`, independent of the
-router. `get_current_user` (used by `GET /auth/me`) decodes the bearer
-token via `decode_access_token`, catching `InvalidTokenError` to return 401.
+router. `POST /auth/login` returns the token in the JSON body **and**
+sets it as an httpOnly `access_token` cookie (`SameSite=Lax`, `Secure`
+gated by `Settings.cookie_secure`) — the cookie is for the browser
+frontend, the JSON body stays for non-browser API callers/tests.
+`get_token_from_request` reads the cookie first, falling back to an
+`Authorization: Bearer` header; `get_current_user` (used by `GET
+/auth/me`) depends on it, decoding via `decode_access_token` and catching
+`InvalidTokenError` to return 401. `POST /auth/logout` clears the cookie.
 Note the pinned versions in `pyproject.toml`: `passlib==1.7.4` +
 `bcrypt==4.0.1` — bcrypt >=4.1 removed an attribute passlib 1.7.4 reads,
 so don't bump `bcrypt` alone without also moving off passlib.
