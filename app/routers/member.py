@@ -35,17 +35,29 @@ def _spouse_info(marriage: Marriage, spouse: Member) -> SpouseInfo:
     )
 
 
-def _build_tree(members: list[Member]) -> MemberTreeNode | None:
+def _build_tree(members: list[Member], marriages: list[Marriage]) -> MemberTreeNode | None:
+    spouse_ids = {marriage.spouse_id for marriage in marriages}
+    marriages_by_member: dict[int, list[Marriage]] = {}
+    for marriage in marriages:
+        marriages_by_member.setdefault(marriage.member_id, []).append(marriage)
+    members_by_id = {member.id: member for member in members}
+
     children_by_parent: dict[int | None, list[Member]] = {}
     for member in members:
         children_by_parent.setdefault(member.parent_id, []).append(member)
 
-    root_candidates = children_by_parent.get(None, [])
+    root_candidates = [
+        member for member in children_by_parent.get(None, []) if member.id not in spouse_ids
+    ]
     if not root_candidates:
         return None
     root = root_candidates[0]
 
     def build(node: Member) -> MemberTreeNode:
+        spouses = [
+            _spouse_info(marriage, members_by_id[marriage.spouse_id])
+            for marriage in marriages_by_member.get(node.id, [])
+        ]
         return MemberTreeNode(
             id=node.id,
             name=node.full_name,
@@ -53,6 +65,7 @@ def _build_tree(members: list[Member]) -> MemberTreeNode | None:
             death_year=node.death_year,
             gender=node.gender,
             notes=node.notes,
+            spouses=spouses,
             children=[build(child) for child in children_by_parent.get(node.id, [])],
         )
 
@@ -72,9 +85,11 @@ async def _is_descendant(db: AsyncSession, ancestor_id: int, candidate_id: int) 
 
 @router.get("/tree", response_model=MemberTreeNode | None)
 async def get_tree(db: AsyncSession = Depends(get_db)) -> MemberTreeNode | None:
-    result = await db.execute(select(Member))
-    members = list(result.scalars().all())
-    return _build_tree(members)
+    members_result = await db.execute(select(Member))
+    members = list(members_result.scalars().all())
+    marriages_result = await db.execute(select(Marriage))
+    marriages = list(marriages_result.scalars().all())
+    return _build_tree(members, marriages)
 
 
 @router.post("", response_model=MemberRead, status_code=status.HTTP_201_CREATED)
