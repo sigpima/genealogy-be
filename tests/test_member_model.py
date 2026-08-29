@@ -45,3 +45,37 @@ async def test_create_child_member(session):
     result = await session.execute(select(Member).where(Member.full_name == "Child"))
     fetched = result.scalar_one()
     assert fetched.parent_id == root.id
+
+
+async def test_create_member_with_details(session):
+    from app.models.member import Member
+
+    member = Member(
+        full_name="Detailed",
+        birth_year=1950,
+        death_year=2010,
+        gender="male",
+        notes="Some notes",
+    )
+    session.add(member)
+    await session.commit()
+    await session.refresh(member)
+
+    assert member.birth_year == 1950
+    assert member.death_year == 2010
+    assert member.gender == "male"
+    assert member.notes == "Some notes"
+
+
+async def test_create_member_without_details_defaults_to_none(session):
+    from app.models.member import Member
+
+    member = Member(full_name="Minimal")
+    session.add(member)
+    await session.commit()
+    await session.refresh(member)
+
+    assert member.birth_year is None
+    assert member.death_year is None
+    assert member.gender is None
+    assert member.notes is None
