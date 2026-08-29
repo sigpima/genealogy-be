@@ -20,9 +20,7 @@ This project uses `uv`, not bare `pip`/`venv` — always prefix Python commands 
 Async FastAPI backend for a genealogy app: auth (register/login/me/logout)
 plus a `Member` CRUD API backing **one shared family tree** — there is no
 per-user ownership, every logged-in user reads/writes the same tree (see
-`docs/superpowers/specs/` for why). A richer `Family`/spouse/marriage
-model was considered and deliberately deferred; don't add
-relationship/ownership concepts without a real UI need driving it.
+`docs/superpowers/specs/` for why).
 
 **`Member` (`app/models/member.py`)** is a single self-referencing table:
 `id`, `full_name`, `parent_id -> members.id` (nullable; `NULL` = root),
@@ -54,6 +52,27 @@ to the root and checking whether the member being updated shows up in it
 is no cascading delete, and none should be added without an explicit
 product decision to allow it. All `/members/*` routes require auth via
 the router-level `dependencies=[Depends(get_current_user)]`.
+
+**Marriages (`app/models/marriage.py`)** let a member have one or more
+recorded spouses over time. A `Marriage` row is just `member_id` +
+`spouse_id` (both FK → `members.id`) + nullable `marriage_year` — a
+spouse is an ordinary `Member` row (`parent_id` always `NULL`, no
+children of its own) that happens to be referenced as `spouse_id` by
+some `Marriage`. Both FKs are `ON DELETE CASCADE`, so **deleting a
+spouse is just the existing `DELETE /members/{id}`** — no dedicated
+"remove marriage" endpoint exists; the DB removes the `Marriage` row as
+a side effect. `POST /members/{member_id}/marriages` creates the spouse
+`Member` and the `Marriage` row together in one call (there is no flow
+to marry two pre-existing tree members to each other); `PUT
+/members/marriages/{marriage_id}` updates `marriage_year` and the
+spouse's own fields together. Because spouses also have `parent_id =
+NULL`, `_build_tree`'s root selection must exclude every id that
+appears as a `spouse_id` in `marriages` — otherwise a member with two
+spouses would produce three `parent_id IS NULL` rows and `root =
+root_candidates[0]` could silently pick a spouse instead of the real
+root. `GET /members/tree` attaches each member's `spouses` list by
+grouping `marriages` by `member_id` (one extra `SELECT * FROM
+marriages`, no N+1).
 
 **Adding any new model requires updating `alembic/env.py`'s import
 line**, not just creating the model file — `target_metadata = Base.metadata`
