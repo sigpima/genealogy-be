@@ -74,6 +74,27 @@ root. `GET /members/tree` attaches each member's `spouses` list by
 grouping `marriages` by `member_id` (one extra `SELECT * FROM
 marriages`, no N+1).
 
+**Avatars (`Member.avatar_url`)** are stored as files on local disk
+under `Settings.upload_dir` (env `UPLOAD_DIR`, default `uploads/`),
+served back by FastAPI's `StaticFiles` mounted at `/uploads` in
+`app/main.py` — `avatar_url` in the DB is always a path like
+`/uploads/avatars/<uuid>.jpg`, never an absolute URL with a host.
+`POST /members/{id}/avatar` (multipart, field `file`) validates content
+type (`image/jpeg`/`png`/`webp` only) and size (5 MB max), deletes the
+member's previous avatar file if one existed, writes the new one under
+a random UUID filename, and updates `avatar_url`; `DELETE
+/members/{id}/avatar` removes the file and clears the column. Only
+top-level tree members get avatars — `SpouseInfo` has no `avatar_url`
+field. **`app/main.py` creates `<upload_dir>/avatars/` at import time**
+(`Path(settings.upload_dir, "avatars").mkdir(parents=True,
+exist_ok=True)`) — without this, mounting `StaticFiles` raises
+`RuntimeError` the moment `app.main` is imported, which is every single
+test via the `client` fixture. Speaking of which: **`tests/conftest.py`'s
+autouse `_env` fixture points `UPLOAD_DIR` at a per-test `tmp_path`**,
+and a sibling `upload_dir` fixture exposes that same path so avatar
+tests can assert on-disk file state — this keeps test runs from ever
+writing into the repo's real `uploads/` folder (which is gitignored).
+
 **Adding any new model requires updating `alembic/env.py`'s import
 line**, not just creating the model file — `target_metadata = Base.metadata`
 only knows about models that have actually been imported somewhere, and
