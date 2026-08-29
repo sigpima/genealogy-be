@@ -65,6 +65,7 @@ def _build_tree(members: list[Member], marriages: list[Marriage]) -> MemberTreeN
             death_year=node.death_year,
             gender=node.gender,
             notes=node.notes,
+            avatar_url=node.avatar_url,
             spouses=spouses,
             children=[build(child) for child in children_by_parent.get(node.id, [])],
         )

@@ -30,6 +30,7 @@ def test_member_read_from_attributes():
         death_year = None
         gender = None
         notes = None
+        avatar_url = None
         created_at = datetime.now(timezone.utc)
 
     read = MemberRead.model_validate(FakeMember())
@@ -92,3 +93,28 @@ def test_member_tree_node_accepts_detail_fields():
     )
     assert node.gender == Gender.female
     assert node.children == []
+
+
+def test_member_read_accepts_avatar_url():
+    from app.schemas.member import MemberRead
+
+    class FakeMember:
+        id = 1
+        full_name = "A B"
+        parent_id = None
+        birth_year = None
+        death_year = None
+        gender = None
+        notes = None
+        avatar_url = "/uploads/avatars/x.jpg"
+        created_at = datetime.now(timezone.utc)
+
+    read = MemberRead.model_validate(FakeMember())
+    assert read.avatar_url == "/uploads/avatars/x.jpg"
+
+
+def test_member_tree_node_accepts_avatar_url():
+    from app.schemas.member import MemberTreeNode
+
+    node = MemberTreeNode(id=1, name="Root", avatar_url="/uploads/avatars/x.jpg")
+    assert node.avatar_url == "/uploads/avatars/x.jpg"

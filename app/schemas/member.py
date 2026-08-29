@@ -107,6 +107,7 @@ class MemberRead(BaseModel):
     death_year: int | None
     gender: Gender | None
     notes: str | None
+    avatar_url: str | None
     created_at: datetime
 
 
@@ -117,5 +118,6 @@ class MemberTreeNode(BaseModel):
     death_year: int | None = None
     gender: Gender | None = None
     notes: str | None = None
+    avatar_url: str | None = None
     spouses: list[SpouseInfo] = []
     children: list["MemberTreeNode"] = []
