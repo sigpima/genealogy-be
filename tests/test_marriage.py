@@ -96,36 +96,5 @@ async def test_tree_includes_spouse_on_correct_node(client):
     response = await client.get("/members/tree")
     tree = response.json()
     assert tree["name"] == "Husband"
-    assert len(tree["spouses"]) == 1
-    assert tree["spouses"][0]["full_name"] == "Wife"
-    assert tree["spouses"][0]["marriage_year"] == 1975
     assert len(tree["children"]) == 1
     assert tree["children"][0]["name"] == "Child"
-
-
-async def test_tree_supports_multiple_marriages(client):
-    await _authenticate(client)
-    root = await client.post("/members", json={"full_name": "Husband", "parent_id": None})
-    root_id = root.json()["id"]
-    await client.post(f"/members/{root_id}/marriages", json={"spouse_full_name": "First Wife"})
-    await client.post(f"/members/{root_id}/marriages", json={"spouse_full_name": "Second Wife"})
-
-    response = await client.get("/members/tree")
-    tree = response.json()
-    names = {spouse["full_name"] for spouse in tree["spouses"]}
-    assert names == {"First Wife", "Second Wife"}
-
-
-async def test_deleting_spouse_removes_marriage(client):
-    await _authenticate(client)
-    root = await client.post("/members", json={"full_name": "Husband", "parent_id": None})
-    root_id = root.json()["id"]
-    created = await client.post(f"/members/{root_id}/marriages", json={"spouse_full_name": "Wife"})
-    spouse_id = created.json()["id"]
-
-    delete_response = await client.delete(f"/members/{spouse_id}")
-    assert delete_response.status_code == 204
-
-    tree_response = await client.get("/members/tree")
-    tree = tree_response.json()
-    assert tree["spouses"] == []

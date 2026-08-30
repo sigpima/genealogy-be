@@ -15,7 +15,9 @@ from app.schemas.member import (
     MarriageCreate,
     MarriageUpdate,
     MemberCreate,
+    MemberDetail,
     MemberRead,
+    MemberSkeletonNode,
     MemberTreeNode,
     MemberUpdate,
     SpouseInfo,
@@ -91,6 +93,14 @@ def _build_tree(members: list[Member], marriages: list[Marriage]) -> MemberTreeN
     return build(root)
 
 
+def _to_skeleton(node: MemberTreeNode) -> MemberSkeletonNode:
+    return MemberSkeletonNode(
+        id=node.id,
+        name=node.name,
+        children=[_to_skeleton(child) for child in node.children],
+    )
+
+
 async def _is_descendant(db: AsyncSession, ancestor_id: int, candidate_id: int) -> bool:
     """True if candidate_id is currently a descendant of ancestor_id."""
     current_id: int | None = candidate_id
@@ -102,13 +112,14 @@ async def _is_descendant(db: AsyncSession, ancestor_id: int, candidate_id: int) 
     return False
 
 
-@router.get("/tree", response_model=MemberTreeNode | None)
-async def get_tree(db: AsyncSession = Depends(get_db)) -> MemberTreeNode | None:
+@router.get("/tree", response_model=MemberSkeletonNode | None)
+async def get_tree(db: AsyncSession = Depends(get_db)) -> MemberSkeletonNode | None:
     members_result = await db.execute(select(Member))
     members = list(members_result.scalars().all())
     marriages_result = await db.execute(select(Marriage))
     marriages = list(marriages_result.scalars().all())
-    return _build_tree(members, marriages)
+    full_tree = _build_tree(members, marriages)
+    return _to_skeleton(full_tree) if full_tree is not None else None
 
 
 @router.post("", response_model=MemberRead, status_code=status.HTTP_201_CREATED)

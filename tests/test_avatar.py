@@ -63,9 +63,6 @@ async def test_upload_avatar_replaces_previous_file(client, upload_dir):
     assert first.json()["avatar_url"] != second_url
     assert not first_path.exists()
 
-    tree = await client.get("/members/tree")
-    assert tree.json()["avatar_url"] == second_url
-
 
 async def test_upload_avatar_rejects_disallowed_content_type(client):
     await _authenticate(client)
@@ -117,28 +114,11 @@ async def test_delete_avatar(client, upload_dir):
     assert response.status_code == 204
     assert not file_path.exists()
 
-    tree = await client.get("/members/tree")
-    assert tree.json()["avatar_url"] is None
-
 
 async def test_delete_avatar_rejects_nonexistent_member(client):
     await _authenticate(client)
     response = await client.delete("/members/9999/avatar")
     assert response.status_code == 404
-
-
-async def test_tree_includes_avatar_url(client):
-    await _authenticate(client)
-    created = await client.post("/members", json={"full_name": "Root", "parent_id": None})
-    member_id = created.json()["id"]
-    upload = await client.post(
-        f"/members/{member_id}/avatar",
-        files={"file": ("avatar.jpg", b"data", "image/jpeg")},
-    )
-    avatar_url = upload.json()["avatar_url"]
-
-    tree = await client.get("/members/tree")
-    assert tree.json()["avatar_url"] == avatar_url
 
 
 async def test_avatar_endpoints_require_auth(client):

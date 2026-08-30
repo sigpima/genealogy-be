@@ -20,6 +20,25 @@ async def test_tree_is_null_when_empty(client):
     assert response.json() is None
 
 
+async def test_tree_response_only_has_skeleton_fields(client):
+    await _authenticate(client)
+    await client.post(
+        "/members",
+        json={
+            "full_name": "Root",
+            "parent_id": None,
+            "birth_year": 1950,
+            "gender": "male",
+            "notes": "some notes",
+        },
+    )
+
+    response = await client.get("/members/tree")
+    assert response.status_code == 200
+    tree = response.json()
+    assert set(tree.keys()) == {"id", "name", "children"}
+
+
 async def test_create_and_fetch_tree(client):
     await _authenticate(client)
     root = await client.post("/members", json={"full_name": "Root", "parent_id": None})
@@ -120,13 +139,6 @@ async def test_create_and_fetch_member_with_details(client):
     body = response.json()
     assert body["birth_year"] == 1950
     assert body["gender"] == "male"
-
-    tree_response = await client.get("/members/tree")
-    tree = tree_response.json()
-    assert tree["birth_year"] == 1950
-    assert tree["death_year"] == 2010
-    assert tree["gender"] == "male"
-    assert tree["notes"] == "Some notes"
 
 
 async def test_update_member_details(client):

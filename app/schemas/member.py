@@ -121,3 +121,19 @@ class MemberTreeNode(BaseModel):
     avatar_url: str | None = None
     spouses: list[SpouseInfo] = []
     children: list["MemberTreeNode"] = []
+
+
+class MemberSkeletonNode(BaseModel):
+    id: int
+    name: str
+    children: list["MemberSkeletonNode"] = []
+
+
+class MemberDetail(BaseModel):
+    id: int
+    birth_year: int | None = None
+    death_year: int | None = None
+    gender: Gender | None = None
+    notes: str | None = None
+    avatar_url: str | None = None
+    spouses: list[SpouseInfo] = []
