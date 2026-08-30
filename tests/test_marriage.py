@@ -98,3 +98,29 @@ async def test_tree_includes_spouse_on_correct_node(client):
     assert tree["name"] == "Husband"
     assert len(tree["children"]) == 1
     assert tree["children"][0]["name"] == "Child"
+
+
+async def test_member_detail_supports_multiple_marriages(client):
+    await _authenticate(client)
+    root = await client.post("/members", json={"full_name": "Husband", "parent_id": None})
+    root_id = root.json()["id"]
+    await client.post(f"/members/{root_id}/marriages", json={"spouse_full_name": "First Wife"})
+    await client.post(f"/members/{root_id}/marriages", json={"spouse_full_name": "Second Wife"})
+
+    response = await client.get(f"/members/{root_id}")
+    names = {spouse["full_name"] for spouse in response.json()["spouses"]}
+    assert names == {"First Wife", "Second Wife"}
+
+
+async def test_deleting_spouse_removes_marriage(client):
+    await _authenticate(client)
+    root = await client.post("/members", json={"full_name": "Husband", "parent_id": None})
+    root_id = root.json()["id"]
+    created = await client.post(f"/members/{root_id}/marriages", json={"spouse_full_name": "Wife"})
+    spouse_id = created.json()["id"]
+
+    delete_response = await client.delete(f"/members/{spouse_id}")
+    assert delete_response.status_code == 204
+
+    detail_response = await client.get(f"/members/{root_id}")
+    assert detail_response.json()["spouses"] == []

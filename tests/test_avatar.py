@@ -121,6 +121,20 @@ async def test_delete_avatar_rejects_nonexistent_member(client):
     assert response.status_code == 404
 
 
+async def test_member_detail_includes_avatar_url(client):
+    await _authenticate(client)
+    created = await client.post("/members", json={"full_name": "Root", "parent_id": None})
+    member_id = created.json()["id"]
+    upload = await client.post(
+        f"/members/{member_id}/avatar",
+        files={"file": ("avatar.jpg", b"data", "image/jpeg")},
+    )
+    avatar_url = upload.json()["avatar_url"]
+
+    detail = await client.get(f"/members/{member_id}")
+    assert detail.json()["avatar_url"] == avatar_url
+
+
 async def test_avatar_endpoints_require_auth(client):
     response = await client.post(
         "/members/1/avatar", files={"file": ("avatar.jpg", b"data", "image/jpeg")}

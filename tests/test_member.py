@@ -141,6 +141,51 @@ async def test_create_and_fetch_member_with_details(client):
     assert body["gender"] == "male"
 
 
+async def test_get_member_detail(client):
+    await _authenticate(client)
+    created = await client.post(
+        "/members",
+        json={
+            "full_name": "Detailed",
+            "parent_id": None,
+            "birth_year": 1950,
+            "death_year": 2010,
+            "gender": "male",
+            "notes": "Some notes",
+        },
+    )
+    member_id = created.json()["id"]
+
+    response = await client.get(f"/members/{member_id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == member_id
+    assert body["birth_year"] == 1950
+    assert body["death_year"] == 2010
+    assert body["gender"] == "male"
+    assert body["notes"] == "Some notes"
+    assert body["spouses"] == []
+
+
+async def test_get_member_detail_defaults_for_bare_member(client):
+    await _authenticate(client)
+    created = await client.post("/members", json={"full_name": "Bare", "parent_id": None})
+    member_id = created.json()["id"]
+
+    response = await client.get(f"/members/{member_id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["birth_year"] is None
+    assert body["avatar_url"] is None
+    assert body["spouses"] == []
+
+
+async def test_get_member_detail_rejects_nonexistent_member(client):
+    await _authenticate(client)
+    response = await client.get("/members/9999")
+    assert response.status_code == 404
+
+
 async def test_update_member_details(client):
     await _authenticate(client)
     created = await client.post("/members", json={"full_name": "Original", "parent_id": None})

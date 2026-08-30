@@ -122,6 +122,31 @@ async def get_tree(db: AsyncSession = Depends(get_db)) -> MemberSkeletonNode | N
     return _to_skeleton(full_tree) if full_tree is not None else None
 
 
+@router.get("/{member_id}", response_model=MemberDetail)
+async def get_member_detail(member_id: int, db: AsyncSession = Depends(get_db)) -> MemberDetail:
+    member = await db.get(Member, member_id)
+    if member is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
+
+    marriages_result = await db.execute(select(Marriage).where(Marriage.member_id == member_id))
+    marriages = list(marriages_result.scalars().all())
+    spouses = []
+    for marriage in marriages:
+        spouse = await db.get(Member, marriage.spouse_id)
+        if spouse is not None:
+            spouses.append(_spouse_info(marriage, spouse))
+
+    return MemberDetail(
+        id=member.id,
+        birth_year=member.birth_year,
+        death_year=member.death_year,
+        gender=member.gender,
+        notes=member.notes,
+        avatar_url=member.avatar_url,
+        spouses=spouses,
+    )
+
+
 @router.post("", response_model=MemberRead, status_code=status.HTTP_201_CREATED)
 async def create_member(payload: MemberCreate, db: AsyncSession = Depends(get_db)) -> Member:
     if payload.parent_id is not None:
