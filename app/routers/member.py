@@ -101,6 +101,28 @@ def _to_skeleton(node: MemberTreeNode) -> MemberSkeletonNode:
     )
 
 
+def _sibling_rank(member: Member, siblings: list[Member]) -> str | None:
+    """Trưởng/Thứ/Út among same-gender siblings, ordered by birth year (unknown last), then id.
+
+    `siblings` must include `member` itself. None for a member with no parent or no male/female gender.
+    """
+    if member.parent_id is None or member.gender not in ("male", "female"):
+        return None
+    same_gender = sorted(
+        (s for s in siblings if s.gender == member.gender),
+        key=lambda s: (s.birth_year is None, s.birth_year or 0, s.id),
+    )
+    position = next((i for i, s in enumerate(same_gender) if s.id == member.id), None)
+    if position is None:
+        return None
+    suffix = "nam" if member.gender == "male" else "nữ"
+    if position == 0:
+        return f"Trưởng {suffix}"
+    if position == len(same_gender) - 1:
+        return f"Út {suffix}"
+    return f"Thứ {suffix}"
+
+
 async def _is_descendant(db: AsyncSession, ancestor_id: int, candidate_id: int) -> bool:
     """True if candidate_id is currently a descendant of ancestor_id."""
     current_id: int | None = candidate_id
@@ -136,6 +158,11 @@ async def get_member_detail(member_id: int, db: AsyncSession = Depends(get_db)) 
         if spouse is not None:
             spouses.append(_spouse_info(marriage, spouse))
 
+    sibling_rank = None
+    if member.parent_id is not None:
+        siblings_result = await db.execute(select(Member).where(Member.parent_id == member.parent_id))
+        sibling_rank = _sibling_rank(member, list(siblings_result.scalars().all()))
+
     return MemberDetail(
         id=member.id,
         birth_year=member.birth_year,
@@ -143,6 +170,13 @@ async def get_member_detail(member_id: int, db: AsyncSession = Depends(get_db)) 
         gender=member.gender,
         notes=member.notes,
         avatar_url=member.avatar_url,
+        courtesy_name=member.courtesy_name,
+        title=member.title,
+        residence=member.residence,
+        burial_place=member.burial_place,
+        burial_latitude=member.burial_latitude,
+        burial_longitude=member.burial_longitude,
+        sibling_rank=sibling_rank,
         spouses=spouses,
     )
 
@@ -161,6 +195,12 @@ async def create_member(payload: MemberCreate, db: AsyncSession = Depends(get_db
         death_year=payload.death_year,
         gender=payload.gender.value if payload.gender is not None else None,
         notes=payload.notes,
+        courtesy_name=payload.courtesy_name,
+        title=payload.title,
+        residence=payload.residence,
+        burial_place=payload.burial_place,
+        burial_latitude=payload.burial_latitude,
+        burial_longitude=payload.burial_longitude,
     )
     db.add(member)
     await db.commit()
@@ -197,6 +237,12 @@ async def update_member(
     member.death_year = payload.death_year
     member.gender = payload.gender.value if payload.gender is not None else None
     member.notes = payload.notes
+    member.courtesy_name = payload.courtesy_name
+    member.title = payload.title
+    member.residence = payload.residence
+    member.burial_place = payload.burial_place
+    member.burial_latitude = payload.burial_latitude
+    member.burial_longitude = payload.burial_longitude
     await db.commit()
     await db.refresh(member)
     return member

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -17,6 +17,12 @@ class Member(Base):
     gender: Mapped[str | None] = mapped_column(String(10), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    courtesy_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    residence: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    burial_place: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    burial_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    burial_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

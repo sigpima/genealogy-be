@@ -15,6 +15,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This project uses `uv`, not bare `pip`/`venv` — always prefix Python commands with `uv run`.
 
+**Running against a real Postgres for testing:** unit tests never need one (SQLite), but to exercise migrations and the real API start a throwaway container, e.g. `docker run -d --rm --name gia-pha-smoke-pg -e POSTGRES_PASSWORD=smoke -e POSTGRES_DB=genealogy_smoke -p 127.0.0.1:55432:5432 postgres:16-alpine`, and point `DATABASE_URL=postgresql+asyncpg://postgres:smoke@127.0.0.1:55432/genealogy_smoke` at it (env vars override `.env`). Never point test runs at the developer's own `genealogy` database.
+
 **Docker:** `Dockerfile` here builds a standalone production image (multi-stage,
 `uv`-installed venv copied into a slim runtime image); its `CMD` runs `alembic
 upgrade head` before starting `uvicorn`, so schema migrations are automatic on
@@ -44,13 +46,29 @@ on that instead of an explicit `.value` is fragile across Python versions
 and DB drivers (`create_member`/`update_member` in
 `app/routers/member.py` both do this correctly; follow that pattern for
 any new enum-backed field). `app/routers/member.py`'s `GET /members/tree`
-walks the whole table in one query and reconstructs it into the `{id,
-name, birth_year, death_year, gender, notes, children}` shape the
-frontend expects (`_build_tree`) — no recursive SQL, just a Python dict
-keyed by `parent_id`. This is the *only* read endpoint for members (no
-`GET /members/{id}`), so it deliberately returns full detail on every
-node rather than just enough to draw the tree shape — the frontend needs
-one fetch, not one-per-member-viewed. `PUT /members/{id}` prevents
+walks the whole table in one query and reconstructs the tree in Python
+(`_build_tree`, a dict keyed by `parent_id`, no recursive SQL), then
+`_to_skeleton` strips it to `{id, name, children}` — the tree response is
+deliberately just the shape, so it stays small for big families. Everything
+else about a member comes from `GET /members/{id}` (`MemberDetail`: years,
+gender, notes, avatar, profile fields, spouses, computed `sibling_rank`),
+which the frontend fetches lazily, one request per member it needs.
+
+**Profile fields (design: `docs/superpowers/specs/2026-10-17-member-profile-fields-design.md`)** —
+`courtesy_name` (tên tự), `title` (chức vị), `residence`, `burial_place`,
+`burial_latitude`/`burial_longitude` are nullable columns on `members`,
+shared by `MemberCreate`/`MemberUpdate` through the `_ProfileFields` base in
+`app/schemas/member.py`: strings are stripped and blank becomes `None`,
+latitude/longitude are range-checked and **both-or-neither** (422
+otherwise). `PUT /members/{id}` is a *full replacement*, so any of these
+omitted in the body becomes `NULL` — clients must send every field.
+`MemberDetail.sibling_rank` ("Trưởng/Thứ/Út nam|nữ") is **computed, not
+stored** (`_sibling_rank` in `app/routers/member.py`): among same-parent,
+same-gender siblings ordered by birth year (unknown last) then id; `None` for
+roots and members without a male/female gender. Spouses (parent_id NULL) are
+never siblings.
+
+`PUT /members/{id}` prevents
 creating a cycle by walking the *proposed* new parent's ancestor chain up
 to the root and checking whether the member being updated shows up in it
 (`_is_descendant`). `DELETE /members/{id}` relies on the FK's default

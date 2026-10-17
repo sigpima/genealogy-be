@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Gender(str, Enum):
@@ -10,7 +10,32 @@ class Gender(str, Enum):
     other = "other"
 
 
-class MemberCreate(BaseModel):
+class _ProfileFields(BaseModel):
+    """Profile fields shared by create and update: stripped, blank -> None, GPS both-or-neither."""
+
+    courtesy_name: str | None = Field(default=None, max_length=100)
+    title: str | None = Field(default=None, max_length=150)
+    residence: str | None = Field(default=None, max_length=255)
+    burial_place: str | None = Field(default=None, max_length=500)
+    burial_latitude: float | None = Field(default=None, ge=-90, le=90)
+    burial_longitude: float | None = Field(default=None, ge=-180, le=180)
+
+    @field_validator("courtesy_name", "title", "residence", "burial_place", mode="before")
+    @classmethod
+    def _blank_to_none(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+    @model_validator(mode="after")
+    def _check_gps(self) -> "_ProfileFields":
+        if (self.burial_latitude is None) != (self.burial_longitude is None):
+            raise ValueError("burial_latitude and burial_longitude must be given together")
+        return self
+
+
+class MemberCreate(_ProfileFields):
     full_name: str = Field(min_length=1)
     parent_id: int | None = None
     birth_year: int | None = None
@@ -29,7 +54,7 @@ class MemberCreate(BaseModel):
         return self
 
 
-class MemberUpdate(BaseModel):
+class MemberUpdate(_ProfileFields):
     full_name: str = Field(min_length=1)
     parent_id: int | None = None
     birth_year: int | None = None
@@ -108,6 +133,12 @@ class MemberRead(BaseModel):
     gender: Gender | None
     notes: str | None
     avatar_url: str | None
+    courtesy_name: str | None
+    title: str | None
+    residence: str | None
+    burial_place: str | None
+    burial_latitude: float | None
+    burial_longitude: float | None
     created_at: datetime
 
 
@@ -136,4 +167,11 @@ class MemberDetail(BaseModel):
     gender: Gender | None = None
     notes: str | None = None
     avatar_url: str | None = None
+    courtesy_name: str | None = None
+    title: str | None = None
+    residence: str | None = None
+    burial_place: str | None = None
+    burial_latitude: float | None = None
+    burial_longitude: float | None = None
+    sibling_rank: str | None = None
     spouses: list[SpouseInfo] = []

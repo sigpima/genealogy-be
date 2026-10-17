@@ -31,6 +31,12 @@ def test_member_read_from_attributes():
         gender = None
         notes = None
         avatar_url = None
+        courtesy_name = None
+        title = None
+        residence = None
+        burial_place = None
+        burial_latitude = None
+        burial_longitude = None
         created_at = datetime.now(timezone.utc)
 
     read = MemberRead.model_validate(FakeMember())
@@ -107,6 +113,12 @@ def test_member_read_accepts_avatar_url():
         gender = None
         notes = None
         avatar_url = "/uploads/avatars/x.jpg"
+        courtesy_name = None
+        title = None
+        residence = None
+        burial_place = None
+        burial_latitude = None
+        burial_longitude = None
         created_at = datetime.now(timezone.utc)
 
     read = MemberRead.model_validate(FakeMember())
