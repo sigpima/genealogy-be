@@ -3,7 +3,6 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_settings
 from app.routers.admin import router as admin_router
@@ -11,6 +10,8 @@ from app.routers.auth import router as auth_router
 from app.routers.member import router as member_router
 from app.routers.member_tools import router as member_tools_router
 from app.routers.site import router as site_router
+from app.routers.trees import router as trees_router
+from app.routers.uploads import router as uploads_router
 
 settings = get_settings()
 
@@ -26,13 +27,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
-
+# Avatars are NOT a static mount: app/routers/uploads.py checks who may see each file.
 app.include_router(auth_router)
 app.include_router(member_tools_router)  # before member_router: /members/table must beat /members/{id}
 app.include_router(member_router)
 app.include_router(admin_router)
 app.include_router(site_router)
+app.include_router(trees_router)
+app.include_router(uploads_router)
 
 
 @app.get("/health")

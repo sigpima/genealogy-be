@@ -2,7 +2,8 @@
 
 - A signed-in user acts on their own tree. Nothing the client sends (cookie, header) can move a
   non-superadmin to another tree.
-- A superadmin has no tree: `X-Tree-Id` picks one, default is the lowest-id tree.
+- A superadmin has no tree: the `X-Tree-Id` header picks one, else the `acting_tree` cookie (set by the web
+  app's tree switcher; ignored when it is not a real tree id), else the lowest-id tree.
 - Guests and signup use the `tree_slug` cookie (set by visiting /t/<slug>); with exactly one tree
   that tree is used without a cookie.
 """
@@ -20,6 +21,7 @@ from app.models.user import User
 
 TREE_SLUG_COOKIE = "tree_slug"
 TREE_ID_HEADER = "X-Tree-Id"
+ACTING_TREE_COOKIE = "acting_tree"
 
 
 @dataclass
@@ -37,17 +39,22 @@ def _not_found(detail: str) -> HTTPException:
 async def tree_for_user(user: User, request: Request, db: AsyncSession) -> Tree:
     if user.role == ROLE_SUPERADMIN:
         raw = request.headers.get(TREE_ID_HEADER)
-        if raw is None:
-            tree = await lowest_tree(db)
+        if raw is not None:  # an explicit header must be right: a wrong id is an error, not a fallback
+            try:
+                tree = await db.get(Tree, int(raw))
+            except ValueError:
+                tree = None
             if tree is None:
-                raise _not_found("there is no tree yet")
+                raise _not_found("tree not found")
             return tree
-        try:
-            tree = await db.get(Tree, int(raw))
-        except ValueError:
-            tree = None
+        cookie = request.cookies.get(ACTING_TREE_COOKIE)
+        if cookie and cookie.isdigit():  # a stale/garbled cookie just means "no choice made"
+            tree = await db.get(Tree, int(cookie))
+            if tree is not None:
+                return tree
+        tree = await lowest_tree(db)
         if tree is None:
-            raise _not_found("tree not found")
+            raise _not_found("there is no tree yet")
         return tree
     if user.tree_id is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="account has no tree")
