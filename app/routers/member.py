@@ -10,7 +10,8 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.marriage import Marriage
 from app.models.member import Member
-from app.routers.auth import get_current_user
+from app.core.permissions import get_viewer, require_admin
+from app.models.user import User
 from app.schemas.member import (
     MarriageCreate,
     MarriageUpdate,
@@ -30,9 +31,10 @@ ALLOWED_AVATAR_CONTENT_TYPES = {
 }
 MAX_AVATAR_SIZE = 5 * 1024 * 1024
 
-router = APIRouter(
-    prefix="/members", tags=["members"], dependencies=[Depends(get_current_user)]
-)
+# Reads need an active user (or nobody at all when the site is public: see get_viewer); every write is
+# admin-only (require_admin on each write route below).
+router = APIRouter(prefix="/members", tags=["members"])
+ADMIN_ONLY = [Depends(require_admin)]
 
 
 def _delete_avatar_file(upload_dir: str, avatar_url: str | None) -> None:
@@ -135,7 +137,9 @@ async def _is_descendant(db: AsyncSession, ancestor_id: int, candidate_id: int) 
 
 
 @router.get("/tree", response_model=MemberSkeletonNode | None)
-async def get_tree(db: AsyncSession = Depends(get_db)) -> MemberSkeletonNode | None:
+async def get_tree(
+    db: AsyncSession = Depends(get_db), viewer: User | None = Depends(get_viewer)
+) -> MemberSkeletonNode | None:
     # ORDER BY id: without it Postgres returns an UPDATEd row after the others, so siblings would
     # reshuffle every time one of them is edited. Creation order is the stable, expected order.
     members_result = await db.execute(select(Member).order_by(Member.id))
@@ -147,7 +151,11 @@ async def get_tree(db: AsyncSession = Depends(get_db)) -> MemberSkeletonNode | N
 
 
 @router.get("/{member_id}", response_model=MemberDetail)
-async def get_member_detail(member_id: int, db: AsyncSession = Depends(get_db)) -> MemberDetail:
+async def get_member_detail(
+    member_id: int,
+    db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_viewer),
+) -> MemberDetail:
     member = await db.get(Member, member_id)
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
@@ -167,25 +175,27 @@ async def get_member_detail(member_id: int, db: AsyncSession = Depends(get_db)) 
         siblings_result = await db.execute(select(Member).where(Member.parent_id == member.parent_id))
         sibling_rank = _sibling_rank(member, list(siblings_result.scalars().all()))
 
-    return MemberDetail(
+    detail = MemberDetail(
         id=member.id,
         birth_year=member.birth_year,
         death_year=member.death_year,
         gender=member.gender,
-        notes=member.notes,
         avatar_url=member.avatar_url,
         courtesy_name=member.courtesy_name,
         title=member.title,
-        residence=member.residence,
-        burial_place=member.burial_place,
-        burial_latitude=member.burial_latitude,
-        burial_longitude=member.burial_longitude,
         sibling_rank=sibling_rank,
         spouses=spouses,
     )
+    if viewer is not None:  # guests (public site) only get the fields above
+        detail.notes = member.notes
+        detail.residence = member.residence
+        detail.burial_place = member.burial_place
+        detail.burial_latitude = member.burial_latitude
+        detail.burial_longitude = member.burial_longitude
+    return detail
 
 
-@router.post("", response_model=MemberRead, status_code=status.HTTP_201_CREATED)
+@router.post("", dependencies=ADMIN_ONLY, response_model=MemberRead, status_code=status.HTTP_201_CREATED)
 async def create_member(payload: MemberCreate, db: AsyncSession = Depends(get_db)) -> Member:
     if payload.parent_id is not None:
         parent = await db.get(Member, payload.parent_id)
@@ -212,7 +222,7 @@ async def create_member(payload: MemberCreate, db: AsyncSession = Depends(get_db
     return member
 
 
-@router.put("/{member_id}", response_model=MemberRead)
+@router.put("/{member_id}", dependencies=ADMIN_ONLY, response_model=MemberRead)
 async def update_member(
     member_id: int, payload: MemberUpdate, db: AsyncSession = Depends(get_db)
 ) -> Member:
@@ -252,7 +262,7 @@ async def update_member(
     return member
 
 
-@router.delete("/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{member_id}", dependencies=ADMIN_ONLY, status_code=status.HTTP_204_NO_CONTENT)
 async def delete_member(member_id: int, db: AsyncSession = Depends(get_db)) -> None:
     member = await db.get(Member, member_id)
     if member is None:
@@ -270,7 +280,8 @@ async def delete_member(member_id: int, db: AsyncSession = Depends(get_db)) -> N
 
 
 @router.post(
-    "/{member_id}/marriages", response_model=SpouseInfo, status_code=status.HTTP_201_CREATED
+    "/{member_id}/marriages",
+    dependencies=ADMIN_ONLY, response_model=SpouseInfo, status_code=status.HTTP_201_CREATED
 )
 async def create_marriage(
     member_id: int, payload: MarriageCreate, db: AsyncSession = Depends(get_db)
@@ -298,7 +309,7 @@ async def create_marriage(
     return _spouse_info(marriage, spouse)
 
 
-@router.put("/marriages/{marriage_id}", response_model=SpouseInfo)
+@router.put("/marriages/{marriage_id}", dependencies=ADMIN_ONLY, response_model=SpouseInfo)
 async def update_marriage(
     marriage_id: int, payload: MarriageUpdate, db: AsyncSession = Depends(get_db)
 ) -> SpouseInfo:
@@ -319,7 +330,7 @@ async def update_marriage(
     return _spouse_info(marriage, spouse)
 
 
-@router.post("/{member_id}/avatar")
+@router.post("/{member_id}/avatar", dependencies=ADMIN_ONLY)
 async def upload_avatar(
     member_id: int, file: UploadFile = File(...), db: AsyncSession = Depends(get_db)
 ) -> dict[str, str]:
@@ -351,7 +362,7 @@ async def upload_avatar(
     return {"avatar_url": avatar_url}
 
 
-@router.delete("/{member_id}/avatar", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{member_id}/avatar", dependencies=ADMIN_ONLY, status_code=status.HTTP_204_NO_CONTENT)
 async def delete_avatar(member_id: int, db: AsyncSession = Depends(get_db)) -> None:
     member = await db.get(Member, member_id)
     if member is None:

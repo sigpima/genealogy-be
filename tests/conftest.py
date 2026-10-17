@@ -142,3 +142,24 @@ async def client(_env, engine) -> AsyncGenerator[AsyncClient, None]:
         yield ac
 
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def make_client(client):
+    """Factory for extra, independent clients (own cookie jar) talking to the same app and DB.
+
+    `client` itself is one logged-in/out session; use this when a test needs several people at once
+    (an admin, a member and a guest).
+    """
+    from app.main import app
+
+    created: list[AsyncClient] = []
+
+    def factory() -> AsyncClient:
+        extra = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+        created.append(extra)
+        return extra
+
+    yield factory
+    for extra in created:
+        await extra.aclose()

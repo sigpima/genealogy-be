@@ -6,8 +6,10 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_settings
+from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
 from app.routers.member import router as member_router
+from app.routers.site import router as site_router
 
 settings = get_settings()
 
@@ -27,6 +29,8 @@ app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads"
 
 app.include_router(auth_router)
 app.include_router(member_router)
+app.include_router(admin_router)
+app.include_router(site_router)
 
 
 @app.get("/health")

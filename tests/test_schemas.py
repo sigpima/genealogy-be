@@ -32,11 +32,14 @@ def test_user_read_from_attributes():
         id = 1
         email = "a@example.com"
         full_name = "A B"
+        role = "member"
+        status = "pending"
         created_at = datetime.now(timezone.utc)
 
     read = UserRead.model_validate(FakeUser())
     assert read.id == 1
     assert read.email == "a@example.com"
+    assert (read.role, read.status) == ("member", "pending")
 
 
 def test_token_response_defaults_token_type_to_bearer():

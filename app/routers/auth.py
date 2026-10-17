@@ -4,11 +4,19 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.email import send_password_reset_email
+from app.core.roles import (
+    ROLE_ADMIN,
+    ROLE_MEMBER,
+    STATUS_ACTIVE,
+    STATUS_DISABLED,
+    STATUS_PENDING,
+    get_site_settings,
+)
 from app.core.security import (
     InvalidTokenError,
     create_access_token,
@@ -62,10 +70,26 @@ async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)) -> U
             status_code=status.HTTP_409_CONFLICT, detail="email already registered"
         )
 
+    # A fresh install must be usable: while there are no users at all, the first registration
+    # becomes the active admin whatever the registration mode is.
+    user_count = (await db.execute(select(func.count()).select_from(User))).scalar_one()
+    if user_count == 0:
+        role, account_status = ROLE_ADMIN, STATUS_ACTIVE
+    else:
+        mode = (await get_site_settings(db))["registration"]
+        if mode == "closed":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="registration is closed"
+            )
+        role = ROLE_MEMBER
+        account_status = STATUS_ACTIVE if mode == "open" else STATUS_PENDING
+
     user = User(
         email=payload.email,
         hashed_password=hash_password(payload.password),
         full_name=payload.full_name,
+        role=role,
+        status=account_status,
     )
     db.add(user)
     await db.commit()
@@ -83,6 +107,10 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials"
         )
+    if user.status == STATUS_PENDING:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="account_pending")
+    if user.status == STATUS_DISABLED:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="account_disabled")
 
     token = create_access_token(subject=user.email)
     settings = get_settings()
@@ -118,6 +146,9 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user not found")
+    # Checked on every request (not just at login) so disabling an account takes effect at once.
+    if user.status != STATUS_ACTIVE:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"account_{user.status}")
     return user
 
 

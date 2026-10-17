@@ -15,4 +15,6 @@ class UserRead(BaseModel):
     id: int
     email: EmailStr
     full_name: str
+    role: str
+    status: str
     created_at: datetime
