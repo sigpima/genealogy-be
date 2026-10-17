@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.kinship import relate
 from app.core.overview import compute_overview
 from app.core.permissions import get_read_context
 from app.core.tenancy import TreeContext
@@ -29,6 +30,7 @@ from app.schemas.search import (
     GenderCounts,
     GenerationCount,
     PersonRef,
+    Relationship,
     SearchItem,
     SearchPage,
     Stats,
@@ -193,6 +195,31 @@ async def search_members(
 
     page = matches[offset : offset + limit]
     return SearchPage(total=len(matches), items=[_item(p, layout, branch_by_id) for p in page], suggestions=suggestions)
+
+
+@router.get("/members/relationship", response_model=Relationship)
+async def relationship(
+    a: int = Query(ge=1),
+    b: int = Query(ge=1),
+    db: AsyncSession = Depends(get_db),
+    ctx: TreeContext = Depends(get_read_context),
+) -> Relationship:
+    """Who `a` is to `b` in Vietnamese kinship terms (and the other way round). Both must be people of this tree."""
+    layout = await load_layout(db, ctx.tree.id)
+    first, second = layout.by_id.get(a), layout.by_id.get(b)
+    if first is None or second is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
+    found = relate(first, second, layout)
+    ancestor = found.common_ancestor
+    return Relationship(
+        kind=found.kind,
+        a_is=found.a_is,
+        b_is=found.b_is,
+        sentence=found.sentence,
+        common_ancestor=PersonRef(id=ancestor.id, name=ancestor.full_name) if ancestor else None,
+        steps_a=found.steps_a,
+        steps_b=found.steps_b,
+    )
 
 
 @router.get("/stats", response_model=Stats)

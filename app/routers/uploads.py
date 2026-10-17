@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.media_files import media_dir, thumbs_dir
-from app.core.permissions import can_read_tree
+from app.core.permissions import can_read_tree, read_access
+from app.core.privacy import privacy_for
 from app.db.session import get_db
 from app.models.media import Media
 from app.models.member import Member
@@ -32,7 +33,11 @@ async def get_avatar(filename: str, request: Request, db: AsyncSession = Depends
     tree_id = (
         await db.execute(select(Member.tree_id).where(Member.avatar_url == f"/uploads/avatars/{filename}"))
     ).scalar_one_or_none()
-    if tree_id is None or not await can_read_tree(request, db, tree_id):
+    if tree_id is None:
+        raise not_found
+    allowed, user = await read_access(request, db, tree_id)
+    # the same per-field rule as the member detail: a photo closed to this viewer is closed as a file too
+    if not allowed or not (await privacy_for(db, tree_id, user)).can_see("avatar"):
         raise not_found
     path = Path(get_settings().upload_dir, "avatars", filename)
     if not path.is_file():

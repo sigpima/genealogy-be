@@ -103,6 +103,18 @@ def _env(monkeypatch, tmp_path):
     get_settings.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def _no_rate_limit():
+    """Rate limiting is off in tests (they log in again and again); tests/test_rate_limit.py turns it on."""
+    from app.core.rate_limit import limiter
+
+    limiter.enabled = False
+    limiter.reset()
+    yield
+    limiter.enabled = False
+    limiter.reset()
+
+
 @pytest.fixture
 def upload_dir(tmp_path) -> Path:
     return tmp_path

@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 Role = Literal["admin", "member"]
 Status = Literal["pending", "active", "disabled"]
@@ -30,3 +30,24 @@ class SiteInfo(BaseModel):
 class SiteSettingsPayload(BaseModel):
     visibility: Literal["private", "public"]
     registration: Literal["open", "approval", "closed"]
+
+
+PrivacyLevel = Literal["admin", "member", "public"]
+
+
+class PrivacyPayload(BaseModel):
+    """Levels to change (the others stay as they are). Unknown fields are refused."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    phone: PrivacyLevel | None = None
+    email: PrivacyLevel | None = None
+    residence: PrivacyLevel | None = None
+    notes: PrivacyLevel | None = None
+    burial: PrivacyLevel | None = None
+    avatar: PrivacyLevel | None = None
+    hometown: PrivacyLevel | None = None
+
+
+class PrivacyRead(BaseModel):
+    fields: dict[str, PrivacyLevel]

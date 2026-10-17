@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.rate_limit import limit_by_ip, limiter
 from app.core.email import send_password_reset_email
 from app.core.roles import (
     ROLE_MEMBER,
@@ -69,6 +70,7 @@ def get_token_from_request(request: Request) -> str:
 async def register(
     payload: UserCreate, request: Request, db: AsyncSession = Depends(get_db)
 ) -> UserRead:
+    limit_by_ip(request, "register", 10, 3600)
     existing = await db.execute(select(User).where(User.email == payload.email))
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(
@@ -111,11 +113,15 @@ async def register(
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
-    payload: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)
+    payload: LoginRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)
 ) -> TokenResponse:
+    limit_by_ip(request, "login", 20, 300)
+    account_key = f"login:account:{payload.email.lower()}"
+    limiter.check(account_key, 8, 300)  # only FAILURES count against an account: guessing from any address stops, the owner is not locked out by their own logins
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
     if user is None or not verify_password(payload.password, user.hashed_password):
+        limiter.record(account_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials"
         )
@@ -177,8 +183,9 @@ async def read_current_user(
 
 @router.post("/forgot-password")
 async def forgot_password(
-    payload: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)
+    payload: ForgotPasswordRequest, request: Request, db: AsyncSession = Depends(get_db)
 ) -> dict[str, str]:
+    limit_by_ip(request, "forgot", 5, 3600)
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
 

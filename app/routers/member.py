@@ -16,6 +16,7 @@ from app.models.media import Media
 from app.models.place import Place
 from app.models.member import Member
 from app.core.permissions import get_read_context, get_write_context
+from app.core.privacy import privacy_for
 from app.core.media_files import delete_media_files
 from app.core.tenancy import TreeContext
 from app.core.tree_layout import deepest_branch, load_branches
@@ -300,13 +301,11 @@ async def get_member_detail(
         birth_year=member.birth_year,
         death_year=member.death_year,
         gender=member.gender,
-        avatar_url=member.avatar_url,
         courtesy_name=member.courtesy_name,
         title=member.title,
         sibling_rank=sibling_rank,
         spouses=spouses,
         branch=await _branch_ref(db, ctx.tree.id, member),
-        hometown=member.hometown,
         birth_month=member.birth_month,
         birth_day=member.birth_day,
         death_month=member.death_month,
@@ -319,20 +318,26 @@ async def get_member_detail(
         is_adopted=member.is_adopted,
         mother_id=member.mother_id,
     )
-    if ctx.user is not None:  # guests (public tree) only get the fields above
+    # Who sees what is the admin's call (app/core/privacy.py); the defaults match what members and guests always saw.
+    privacy = await privacy_for(db, ctx.tree.id, ctx.user)
+    for field in ("phone", "email", "residence", "notes"):
+        if privacy.can_see(field):
+            setattr(detail, field, getattr(member, field))
+    if not privacy.can_see("notes"):
+        for spouse in detail.spouses:
+            spouse.notes = None
+    if privacy.can_see("burial"):
         detail.burial_place_id = member.burial_place_id
         detail.burial_plot = member.burial_plot
         if member.burial_place_id is not None:
             place = await db.get(Place, member.burial_place_id)
             if place is not None:
                 detail.resting_place = PlaceRef(id=place.id, name=place.name, kind=place.kind, latitude=place.latitude, longitude=place.longitude)
-        detail.phone = member.phone
-        detail.email = member.email
-        detail.notes = member.notes
-        detail.residence = member.residence
         detail.burial_place = member.burial_place
         detail.burial_latitude = member.burial_latitude
         detail.burial_longitude = member.burial_longitude
+    detail.avatar_url = member.avatar_url if privacy.can_see("avatar") else None
+    detail.hometown = member.hometown if privacy.can_see("hometown") else None
     return detail
 
 

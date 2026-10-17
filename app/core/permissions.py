@@ -70,16 +70,22 @@ async def get_read_context(request: Request, db: AsyncSession = Depends(get_db))
     return TreeContext(tree=tree, user=None)
 
 
-async def can_read_tree(request: Request, db: AsyncSession, tree_id: int, *, allow_guests: bool = True) -> bool:
-    """Same rules as `get_read_context`, for a tree that is already known (no cookie/header lookup):
-    an active member of that tree or the superadmin, or anybody when that tree is public. A bad token
-    or a pending/disabled account counts as a stranger. `allow_guests=False` is for material that guests of a public tree never
-    see (media, places): only the first branch can say yes."""
+async def read_access(request: Request, db: AsyncSession, tree_id: int, *, allow_guests: bool = True) -> tuple[bool, User | None]:
+    """(may read, the signed-in user if that is what grants it). Same rules as `get_read_context`, for a tree that is
+    already known (no cookie/header lookup): an active member of that tree or the superadmin, or anybody when that tree
+    is public. A bad token or a pending/disabled account counts as a stranger. `allow_guests=False` is for material
+    that guests of a public tree never see (media, places): only the first branch can say yes."""
     if request.cookies.get(ACCESS_TOKEN_COOKIE) or request.headers.get("Authorization"):
         try:
             user = await get_current_user(get_token_from_request(request), db)
         except HTTPException:
             user = None
         if user is not None and (user.role == ROLE_SUPERADMIN or user.tree_id == tree_id):
-            return True
-    return allow_guests and (await get_tree_settings(db, tree_id))["visibility"] == "public"
+            return True, user
+    if allow_guests and (await get_tree_settings(db, tree_id))["visibility"] == "public":
+        return True, None
+    return False, None
+
+
+async def can_read_tree(request: Request, db: AsyncSession, tree_id: int, *, allow_guests: bool = True) -> bool:
+    return (await read_access(request, db, tree_id, allow_guests=allow_guests))[0]

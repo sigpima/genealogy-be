@@ -13,6 +13,7 @@ from app.routers.book import router as book_router
 from app.routers.branches import router as branches_router
 from app.routers.calendar import router as calendar_router
 from app.routers.events import router as events_router
+from app.routers.export import router as export_router
 from app.routers.generation_words import router as generation_words_router
 from app.routers.invitations import admin_router as invitations_admin_router
 from app.routers.invitations import public_router as invitations_public_router
@@ -42,6 +43,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Cheap, safe-everywhere headers. HSTS and CSP are deliberately not here: HSTS belongs to whatever terminates
+    HTTPS (sending it over plain HTTP is wrong) and the CSP to the web app that serves the pages."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    return response
+
+
 # Avatars are NOT a static mount: app/routers/uploads.py checks who may see each file.
 app.include_router(auth_router)
 app.include_router(member_search_router)  # before member_router: /members/search must beat /members/{id}
@@ -59,6 +72,7 @@ app.include_router(places_router)
 app.include_router(media_router)
 app.include_router(articles_router)
 app.include_router(book_router)
+app.include_router(export_router)
 app.include_router(timeline_router)
 app.include_router(generation_words_router)
 app.include_router(invitations_admin_router)

@@ -441,4 +441,21 @@ timeline), "Phả hệ theo đời" (a block per person), and "Phả đồ" — 
 Vietnamese; the book never depends on host fonts). Markdown is reduced to bold/lists/quotes/rules with every piece of text XML-escaped (`&` in a title is the classic
 ReportLab crash). `pypdf` (dev) reads the PDFs back in `tests/test_book.py`. A ~700-person tree builds in well under the 90 s the test allows.
 
+**Privacy per field (GĐ11; design: `docs/superpowers/specs/2026-10-19-gd11-privacy-ops-design.md`)** — `app/core/privacy.py` is the ONE place that decides who sees
+`phone/email/residence/notes/burial/avatar/hometown` (levels `admin < member < public`; stored as `site_settings` rows `privacy.<field>`; defaults reproduce the pre-GĐ11
+behaviour: members see all, guests of a public tree see hometown + avatar). `GET/PUT /admin/privacy` (audited `privacy.update`). Applied in the member detail
+(**including the spouses' notes**), the **avatar file route** (`read_access` in `permissions.py` returns the user so the file obeys the same rule as the URL) and change
+requests (a member cannot *propose* a field closed to them; closed fields' old values are removed from what they read). Any new endpoint that returns member fields to
+non-admins must go through `privacy_for` — do not re-implement "guests get less" by hand.
+
+**Kinship (GĐ11 B4)** — `GET /members/relationship?a=&b=` (`app/core/kinship.py::relate`, pure over `TreeLayout`): father-line terms only (`bác` = older than the father,
+`chú/cô` younger, cousins ordered by **branch order not age**, `ông/cụ/kỵ`, `chắt/chút`), spouses through their partner with the usual terms (thím, chị dâu, dượng...). Maternal
+relatives and in-law terms beyond a short table are out of scope — the mother is a spouse, not a parent, so `cậu/dì` cannot be derived.
+
+**Operations (GĐ11)** — `app/core/rate_limit.py` (in-memory sliding windows, per process): login 20/5 min per address + **8 failures/5 min per account**, register 10/h, forgot-password 5/h,
+public RSVP 40/10 min; 429 + `Retry-After`. **Measured:** Next.js's `/api` proxy does not forward the visitor's address, so unless `TRUSTED_PROXY_HOPS` says a real reverse proxy
+overwrites `X-Forwarded-For` the "address" is the web container for everybody and the per-address limits are loosened ×5 (`SHARED_ADDRESS_FACTOR`). Tests switch the limiter off in
+`conftest.py` (`limiter.enabled`) — turn it on with the `on` fixture in `tests/test_rate_limit.py`. Security headers come from a middleware in `app/main.py`. `GET /export/data.json` (admin, audited
+`data.export`) dumps the tree's tables **without credentials or tokens** (`SECRET_COLUMNS`). Backups are `scripts/backup.sh` / `scripts/restore.sh` at the repo root (see `docs/SAO-LUU.md`).
+
 `GET /health` (public, no DB access) is the container healthcheck target.

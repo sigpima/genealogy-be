@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = ""
     smtp_use_tls: bool = True
+    # Operations (GĐ11): see app/core/rate_limit.py. 0 hops = never trust X-Forwarded-For.
+    rate_limit_enabled: bool = True
+    trusted_proxy_hops: int = 0
 
     @model_validator(mode="after")
     def _resolve_database_url(self) -> "Settings":

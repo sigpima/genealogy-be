@@ -2,14 +2,16 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import audit
 from app.core.permissions import get_write_context
+from app.core.privacy import KEY_PREFIX, field_levels
 from app.core.roles import ROLE_ADMIN, STATUS_ACTIVE, get_tree_settings
 from app.core.security import hash_password
 from app.core.tenancy import TreeContext
 from app.db.session import get_db
 from app.models.site_setting import SiteSetting
 from app.models.user import User
-from app.schemas.admin import AdminUserCreate, AdminUserUpdate, SiteSettingsPayload
+from app.schemas.admin import AdminUserCreate, AdminUserUpdate, PrivacyPayload, PrivacyRead, SiteSettingsPayload
 from app.schemas.user import UserRead
 
 # Everything here acts on ONE tree: the admin's own, or the one a superadmin picked (X-Tree-Id).
@@ -122,3 +124,30 @@ async def update_settings(
             row.value = value
     await db.commit()
     return await get_tree_settings(db, ctx.tree.id)
+
+
+@router.get("/privacy", response_model=PrivacyRead)
+async def read_privacy(ctx: TreeContext = Depends(get_write_context), db: AsyncSession = Depends(get_db)) -> PrivacyRead:
+    return PrivacyRead(fields=await field_levels(db, ctx.tree.id))
+
+
+@router.put("/privacy", response_model=PrivacyRead)
+async def update_privacy(
+    payload: PrivacyPayload, ctx: TreeContext = Depends(get_write_context), db: AsyncSession = Depends(get_db)
+) -> PrivacyRead:
+    """Who may see which sensitive field; only the fields present in the payload change."""
+    before = await field_levels(db, ctx.tree.id)
+    wanted = {name: level for name, level in payload.model_dump().items() if level is not None}
+    for name, level in wanted.items():
+        key = KEY_PREFIX + name
+        row = await db.get(SiteSetting, (ctx.tree.id, key))
+        if row is None:
+            db.add(SiteSetting(tree_id=ctx.tree.id, key=key, value=level))
+        else:
+            row.value = level
+    after = {**before, **wanted}
+    changes = audit.diff_values(before, after)
+    if changes:
+        audit.record(db, tree_id=ctx.tree.id, actor=ctx.user, action="privacy.update", changes=changes)
+    await db.commit()
+    return PrivacyRead(fields=await field_levels(db, ctx.tree.id))

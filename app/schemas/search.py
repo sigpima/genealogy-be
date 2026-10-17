@@ -63,3 +63,15 @@ class Stats(BaseModel):
     status: StatusCounts
     by_branch: list[BranchCount]
     without_branch: int
+
+
+class Relationship(BaseModel):
+    """Who A is to B and B to A (GĐ11 B4). `a_is` reads "A là {a_is} của B"."""
+
+    kind: str  # self | spouse | blood | in_law | none
+    a_is: str | None = None
+    b_is: str | None = None
+    sentence: str
+    common_ancestor: PersonRef | None = None
+    steps_a: int | None = None
+    steps_b: int | None = None

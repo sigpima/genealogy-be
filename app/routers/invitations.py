@@ -8,7 +8,7 @@ import csv
 import io
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,7 @@ from app.core import audit, calendar_items
 from app.core.audit import diff_values
 from app.core.lunar import solar_to_lunar
 from app.core.permissions import get_write_context
+from app.core.rate_limit import limit_by_ip
 from app.core.tenancy import TreeContext
 from app.db.session import get_db
 from app.models.event import Event
@@ -294,7 +295,8 @@ async def view(token: str, db: AsyncSession = Depends(get_db)) -> PublicCard:
 
 
 @public_router.post("/{token}/respond", response_model=RespondResult)
-async def respond(token: str, payload: RespondIn, db: AsyncSession = Depends(get_db)) -> RespondResult:
+async def respond(token: str, payload: RespondIn, request: Request, db: AsyncSession = Depends(get_db)) -> RespondResult:
+    limit_by_ip(request, "rsvp", 40, 600)
     card, rsvp = await _resolve(db, token)
     if card.closed or _expired(card):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="this invitation is closed")

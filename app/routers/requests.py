@@ -19,6 +19,7 @@ from app.core import audit
 from app.core.config import get_settings
 from app.core.email import send_email
 from app.core.permissions import get_user_context, get_write_context
+from app.core.privacy import privacy_for
 from app.core.roles import ADMIN_ROLES, ROLE_ADMIN, STATUS_ACTIVE
 from app.core.tenancy import TreeContext
 from app.db.session import get_db
@@ -90,9 +91,14 @@ def _diff(req: ChangeRequest, member: Member | None) -> list[DiffRow]:
     return rows
 
 
-async def _read(db: AsyncSession, req: ChangeRequest) -> RequestRead:
+async def _read(db: AsyncSession, req: ChangeRequest, ctx: TreeContext) -> RequestRead:
     member = await db.get(Member, req.member_id) if req.member_id is not None else None
     diff = _diff(req, member)
+    base = req.base
+    privacy = await privacy_for(db, ctx.tree.id, ctx.user)
+    if not privacy.can_see_everything():  # a field closed to this viewer must not leak through the old values
+        diff = [row for row in diff if not privacy.hides_column(row.field)]
+        base = {name: value for name, value in req.base.items() if not privacy.hides_column(name)}
     return RequestRead(
         id=req.id,
         kind=req.kind,
@@ -100,8 +106,8 @@ async def _read(db: AsyncSession, req: ChangeRequest) -> RequestRead:
         member_id=req.member_id,
         member_name=member.full_name if member else req.member_name,
         message=req.message,
-        changes=req.changes,
-        base=req.base,
+        changes=req.changes if privacy.can_see_everything() or not any(privacy.hides_column(n) for n in req.changes) else {n: v for n, v in req.changes.items() if not privacy.hides_column(n)},
+        base=base,
         diff=diff,
         stale=any(d.stale for d in diff),
         requester=PersonName(id=req.requester_id, name=req.requester_name),
@@ -153,12 +159,12 @@ async def list_requests(
     rows = (
         await db.execute(select(ChangeRequest).where(*conditions).order_by(ChangeRequest.id.desc()).limit(limit).offset(offset))
     ).scalars().all()
-    return RequestPage(total=total, items=[await _read(db, r) for r in rows])
+    return RequestPage(total=total, items=[await _read(db, r, ctx) for r in rows])
 
 
 @router.get("/{request_id}", response_model=RequestRead)
 async def get_request(request_id: int, db: AsyncSession = Depends(get_db), ctx: TreeContext = Depends(get_user_context)) -> RequestRead:
-    return await _read(db, await _visible(db, ctx, request_id))
+    return await _read(db, await _visible(db, ctx, request_id), ctx)
 
 
 # --------------------------------------------------------------------------- notifications
@@ -191,6 +197,10 @@ async def create_request(
     unknown = _unknown_fields(payload.changes)
     if unknown:
         raise _unprocessable(f"these fields cannot be proposed: {', '.join(unknown)}")
+    privacy = await privacy_for(db, ctx.tree.id, ctx.user)
+    closed = sorted(name for name in payload.changes if privacy.hides_column(name))
+    if closed:  # proposing a change shows the old value back, so a field closed to this person is closed to proposals too
+        raise _unprocessable(f"these fields are not open to you: {', '.join(closed)}")
 
     changes: dict[str, Any] = {}
     base: dict[str, Any] = {}
@@ -244,7 +254,7 @@ async def create_request(
         f"{ctx.user.full_name} vừa gửi một yêu cầu ({KIND_LABELS[req.kind]}) về {member.full_name}.\n\n"
         f"{payload.message or ''}\n\nVào mục Yêu cầu trên trang gia phả để xem và duyệt.",
     )
-    return await _read(db, req)
+    return await _read(db, req, ctx)
 
 
 # --------------------------------------------------------------------------- deciding
@@ -321,7 +331,7 @@ async def approve(
     await db.commit()
     await db.refresh(req)
     await _tell_requester(db, req, ctx, "chấp nhận")
-    return await _read(db, req)
+    return await _read(db, req, ctx)
 
 
 @router.post("/{request_id}/reject", response_model=RequestRead)
@@ -348,7 +358,7 @@ async def reject(
     await db.commit()
     await db.refresh(req)
     await _tell_requester(db, req, ctx, "từ chối")
-    return await _read(db, req)
+    return await _read(db, req, ctx)
 
 
 @router.post("/{request_id}/cancel", response_model=RequestRead)
@@ -365,4 +375,4 @@ async def cancel(
     req.reviewed_at = datetime.datetime.now(datetime.timezone.utc)
     await db.commit()
     await db.refresh(req)
-    return await _read(db, req)
+    return await _read(db, req, ctx)
