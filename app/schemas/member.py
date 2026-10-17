@@ -3,7 +3,7 @@ from datetime import date, datetime
 from enum import Enum
 
 from email_validator import EmailNotValidError, validate_email
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator, model_validator
 
 
 class Gender(str, Enum):
@@ -152,6 +152,17 @@ class MemberUpdate(_ProfileFields):
         ):
             raise ValueError("death_year cannot be before birth_year")
         return self
+
+
+def _optional_copy(model: type[BaseModel]) -> dict:
+    return {name: (field.annotation | None, None) for name, field in model.model_fields.items()}
+
+
+# PATCH body: every MemberUpdate field, all optional and unconstrained here - the router merges it onto the
+# stored member and validates the result with MemberUpdate, so the rules live in one place.
+MemberPatch = create_model(
+    "MemberPatch", __config__=ConfigDict(extra="forbid"), **_optional_copy(MemberUpdate)
+)
 
 
 class MarriageCreate(BaseModel):

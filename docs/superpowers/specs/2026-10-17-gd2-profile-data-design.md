@@ -49,7 +49,7 @@ Sibling order everywhere (the tree, `sibling_rank`): `birth_order` first (set on
   child (needs `full_name` and an existing `parent_id`). **A blank cell means "leave unchanged"; the cell `-` clears the
   value.** All-or-nothing: any error rejects the whole file with a per-row error list (422); `dry_run` validates and
   reports counts without writing. Limits: 5 MB, 10,000 rows. Gender accepts `nam/nữ/khác` or `male/female/other`; flags
-  accept `x`, `1`, `true`, `có`.
+  accept `x/1/true/có` (true) and `0/false/không` (false), `-` resets a flag to its default; export writes `1`/`0`.
 
 ## Frontend (genealogy-web)
 

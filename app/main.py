@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
 from app.routers.member import router as member_router
+from app.routers.member_tools import router as member_tools_router
 from app.routers.site import router as site_router
 
 settings = get_settings()
@@ -28,6 +29,7 @@ app.add_middleware(
 app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 
 app.include_router(auth_router)
+app.include_router(member_tools_router)  # before member_router: /members/table must beat /members/{id}
 app.include_router(member_router)
 app.include_router(admin_router)
 app.include_router(site_router)

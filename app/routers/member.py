@@ -2,6 +2,8 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +19,7 @@ from app.schemas.member import (
     MarriageUpdate,
     MemberCreate,
     MemberDetail,
+    MemberPatch,
     MemberRead,
     MemberSkeletonNode,
     MemberTreeNode,
@@ -54,6 +57,14 @@ PROFILE_FIELDS = (
     "birth_is_lunar", "birth_leap_month", "death_is_lunar", "death_leap_month",
     "birth_order", "is_adopted",
 )
+
+
+WRITABLE_FIELDS = ("full_name", "parent_id", "mother_id", "gender", *PROFILE_FIELDS)
+
+
+def member_values(member: Member) -> dict:
+    """The member's writable fields as a `MemberUpdate`-shaped dict (used to merge PATCH and CSV rows)."""
+    return {field: getattr(member, field) for field in WRITABLE_FIELDS}
 
 
 def _assign(member: Member, payload: MemberCreate | MemberUpdate) -> None:
@@ -286,6 +297,31 @@ async def create_member(
     return member
 
 
+async def _apply_update(
+    db: AsyncSession, ctx: TreeContext, member: Member, payload: MemberUpdate
+) -> Member:
+    if payload.parent_id is not None:
+        if payload.parent_id == member.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="a member cannot be its own parent",
+            )
+        new_parent = await _member_in_tree(db, ctx.tree.id, payload.parent_id)
+        if new_parent is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="parent not found")
+        if await _is_descendant(db, member.id, payload.parent_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="cannot set parent to one of the member's own descendants",
+            )
+    await _check_mother(db, payload.parent_id, payload.mother_id)
+
+    _assign(member, payload)
+    await db.commit()
+    await db.refresh(member)
+    return member
+
+
 @router.put("/{member_id}", response_model=MemberRead)
 async def update_member(
     member_id: int,
@@ -296,28 +332,28 @@ async def update_member(
     member = await _member_in_tree(db, ctx.tree.id, member_id)
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
+    return await _apply_update(db, ctx, member, payload)
 
-    if payload.parent_id is not None:
-        if payload.parent_id == member_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="a member cannot be its own parent",
-            )
-        new_parent = await _member_in_tree(db, ctx.tree.id, payload.parent_id)
-        if new_parent is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="parent not found")
-        if await _is_descendant(db, member_id, payload.parent_id):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="cannot set parent to one of the member's own descendants",
-            )
 
-    await _check_mother(db, payload.parent_id, payload.mother_id)
-
-    _assign(member, payload)
-    await db.commit()
-    await db.refresh(member)
-    return member
+@router.patch("/{member_id}", response_model=MemberRead)
+async def patch_member(
+    member_id: int,
+    payload: MemberPatch,
+    db: AsyncSession = Depends(get_db),
+    ctx: TreeContext = Depends(get_write_context),
+) -> Member:
+    """Change only the fields sent (null clears one). The merged result is validated like a PUT, so a
+    grid can save a single cell without re-sending the whole member."""
+    member = await _member_in_tree(db, ctx.tree.id, member_id)
+    if member is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
+    merged = member_values(member)
+    merged.update(payload.model_dump(exclude_unset=True))
+    try:
+        merged_payload = MemberUpdate.model_validate(merged)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors(include_url=False, include_context=False)) from None
+    return await _apply_update(db, ctx, member, merged_payload)
 
 
 @router.delete("/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
