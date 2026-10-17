@@ -167,6 +167,23 @@ events, stable UIDs, 30 days back to 2 years ahead). **Reminders:** per user `re
 3600`, the `worker` service in the root compose) can restart or overlap without duplicates — and emails only when `SMTP_HOST` is set
 (a failing mail server costs the email, never the notification). `GET /notifications`, `POST /notifications/read` (only my own rows).
 
+**Media and places (GĐ6; design: `docs/superpowers/specs/2026-10-18-gd6-media-places-design.md`)** —
+**`media`** (`app/routers/media.py`, `app/core/media_processing.py`, `app/core/media_files.py`): photos and PDFs on a person
+(`/members/{id}/media`) or a place (`/places/{id}/media`), admin upload (≤ 10 MB), files under `UPLOAD_DIR/media/` + `media/thumbs/` with random
+UUID names. **The content is checked, not the declared type**: an image must open in Pillow (JPEG/PNG/WebP; decompression-bomb limit of 60 M
+pixels; EXIF rotation applied to the 480 px JPEG thumbnail only, the original is stored untouched), a PDF must start with `%PDF-`; the check
+runs in `asyncio.to_thread`. Files are served by `GET /uploads/media/<name>` and `/uploads/media/thumbs/<name>` (`app/routers/uploads.py`) with
+`can_read_tree(..., allow_guests=False)` — **signed-in users of the tree only, never guests of a public tree** (scans of documents and graves;
+per-item privacy is GĐ11); everything else is 404. Deleting a person or place deletes their files (after the commit succeeds). Uploads, captions and
+deletions are audited (`media.*`). **`places`** (`app/routers/places.py`): kinds `clan_house|temple|tomb|cemetery|other`, GPS both-or-neither,
+**signed-in readers only** (a grave's location is burial information, which `MemberDetail` already redacts for guests), admin writes
+(audited `place.*`). Members point at one with `burial_place_id` (FK `SET NULL`) + `burial_plot`, checked to be the same tree (`check_place`, 404);
+both are in `PROFILE_FIELDS`, the CSV columns and the redaction list, and are **not proposable** (`PROPOSABLE` excludes them).
+`MemberDetail.resting_place` carries the place's name/kind/GPS. `POST /places/migrate-burials?dry_run=` groups the legacy `burial_place` text
+(folded: case, diacritics, spacing), reuses a same-named place or creates a `tomb`, takes GPS from the first person who has it, links people
+and leaves the old fields alone; idempotent. Events can have a `place_id` (calendar items then show the place as their location).
+Pillow was added with `uv add pillow` (the Dockerfile installs from `uv.lock`, so the lock must be updated with the dependency).
+
 **Marriages (`app/models/marriage.py`)** let a member have one or more
 recorded spouses over time. A `Marriage` row is just `member_id` +
 `spouse_id` (both FK → `members.id`) + nullable `marriage_year` — a
