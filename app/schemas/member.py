@@ -5,6 +5,8 @@ from enum import Enum
 from email_validator import EmailNotValidError, validate_email
 from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator, model_validator
 
+from app.schemas.branch import BranchRef
+
 
 class Gender(str, Enum):
     male = "male"
@@ -280,6 +282,7 @@ class MemberDetail(BaseModel):
     burial_latitude: float | None = None
     burial_longitude: float | None = None
     sibling_rank: str | None = None
+    branch: BranchRef | None = None
     hometown: str | None = None
     phone: str | None = None
     email: str | None = None

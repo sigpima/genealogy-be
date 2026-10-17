@@ -19,6 +19,7 @@ from app.core.tenancy import TreeContext
 from app.db.session import get_db
 from app.models.marriage import Marriage
 from app.models.member import Member
+from app.core.tree_layout import TreeLayout, load_layout
 from app.routers.member import _assign, _member_in_tree, member_values
 from app.schemas.member import Gender, MemberCreate, MemberRead, MemberUpdate
 
@@ -27,47 +28,6 @@ router = APIRouter(prefix="/members", tags=["member tools"])
 MAX_IMPORT_BYTES = 5 * 1024 * 1024
 MAX_IMPORT_ROWS = 10_000
 MISSING_FIELDS = ("gender", "birth_year", "hometown", "death_year")
-
-
-# --------------------------------------------------------------------------- tree helpers
-
-
-class _Layout:
-    """The tree's members (spouses excluded) in depth-first order with their generation, built in memory."""
-
-    def __init__(self, members: list[Member], spouse_ids: set[int]) -> None:
-        self.by_id = {m.id: m for m in members}
-        self.children: dict[int | None, list[Member]] = {}
-        for member in members:
-            if member.id not in spouse_ids:
-                self.children.setdefault(member.parent_id, []).append(member)
-        for siblings in self.children.values():
-            siblings.sort(key=lambda m: (m.birth_order is None, m.birth_order or 0, m.id))
-        self.order: list[Member] = []
-        self.generation: dict[int, int] = {}
-        stack = [(m, 1) for m in reversed(self.children.get(None, []))]
-        while stack:
-            member, generation = stack.pop()
-            self.order.append(member)
-            self.generation[member.id] = generation
-            stack.extend((child, generation + 1) for child in reversed(self.children.get(member.id, [])))
-
-    def subtree_ids(self, root_id: int) -> set[int]:
-        found, pending = set(), [root_id]
-        while pending:
-            current = pending.pop()
-            found.add(current)
-            pending.extend(child.id for child in self.children.get(current, []))
-        return found
-
-
-async def _load_layout(db: AsyncSession, tree_id: int) -> _Layout:
-    members = list((await db.execute(select(Member).where(Member.tree_id == tree_id))).scalars().all())
-    ids = [m.id for m in members]
-    spouse_ids = set(
-        (await db.execute(select(Marriage.spouse_id).where(Marriage.member_id.in_(ids)))).scalars().all()
-    )
-    return _Layout(members, spouse_ids)
 
 
 # --------------------------------------------------------------------------- table
@@ -105,7 +65,7 @@ class TablePage(BaseModel):
     items: list[TableRow]
 
 
-def _row(member: Member, layout: _Layout) -> TableRow:
+def _row(member: Member, layout: TreeLayout) -> TableRow:
     parent = layout.by_id.get(member.parent_id) if member.parent_id is not None else None
     return TableRow(
         generation=layout.generation[member.id],
@@ -128,7 +88,7 @@ async def members_table(
 ) -> TablePage:
     if under is not None and await _member_in_tree(db, ctx.tree.id, under) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
-    layout = await _load_layout(db, ctx.tree.id)
+    layout = await load_layout(db, ctx.tree.id)
     allowed = layout.subtree_ids(under) if under is not None else None
     needle = q.strip().casefold() if q and q.strip() else None
 
@@ -161,7 +121,7 @@ class Completeness(BaseModel):
 async def completeness(
     db: AsyncSession = Depends(get_db), ctx: TreeContext = Depends(get_write_context)
 ) -> Completeness:
-    layout = await _load_layout(db, ctx.tree.id)
+    layout = await load_layout(db, ctx.tree.id)
     members = layout.order
     return Completeness(
         total=len(members),
@@ -264,7 +224,7 @@ def _export_cell(member: Member, column: str) -> str:
 async def export_csv(
     db: AsyncSession = Depends(get_db), ctx: TreeContext = Depends(get_write_context)
 ) -> Response:
-    layout = await _load_layout(db, ctx.tree.id)
+    layout = await load_layout(db, ctx.tree.id)
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\r\n")
     writer.writerow(CSV_COLUMNS)

@@ -14,6 +14,8 @@ from app.models.marriage import Marriage
 from app.models.member import Member
 from app.core.permissions import get_read_context, get_write_context
 from app.core.tenancy import TreeContext
+from app.core.tree_layout import deepest_branch, load_branches
+from app.schemas.branch import BranchRef
 from app.schemas.member import (
     MarriageCreate,
     MarriageUpdate,
@@ -178,6 +180,11 @@ def _sibling_rank(member: Member, siblings: list[Member]) -> str | None:
     return f"Thứ {suffix}"
 
 
+async def _branch_ref(db: AsyncSession, tree_id: int, member: Member) -> BranchRef | None:
+    branch = await deepest_branch(db, member, await load_branches(db, tree_id))
+    return BranchRef(id=branch.id, name=branch.name, color=branch.color) if branch else None
+
+
 async def _member_in_tree(db: AsyncSession, tree_id: int, member_id: int) -> Member | None:
     member = await db.get(Member, member_id)
     return member if member is not None and member.tree_id == tree_id else None
@@ -252,6 +259,7 @@ async def get_member_detail(
         title=member.title,
         sibling_rank=sibling_rank,
         spouses=spouses,
+        branch=await _branch_ref(db, ctx.tree.id, member),
         hometown=member.hometown,
         birth_month=member.birth_month,
         birth_day=member.birth_day,
