@@ -10,7 +10,19 @@ sys.path.append(os.getcwd())
 
 from app.core.config import get_settings  # noqa: E402
 from app.db.base import Base  # noqa: E402
-from app.models import audit_log, branch, change_request, marriage, member, password_reset_token, site_setting, tree, user  # noqa: E402,F401  (registers models on Base.metadata)
+from app.models import (  # noqa: E402,F401  (registers models on Base.metadata)
+    audit_log,
+    branch,
+    change_request,
+    event,
+    marriage,
+    member,
+    notification,
+    password_reset_token,
+    site_setting,
+    tree,
+    user,
+)
 
 config = context.config
 

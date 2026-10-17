@@ -148,6 +148,25 @@ create/update/delete/split/avatar, marriage create/update, CSV import (one entry
 request decisions; `member_id` has no FK so a deleted person's history survives, creation/deletion entries list only non-default fields.
 **Any new write route must call `audit_member`/`audit.record`** (and be added to the admin-only list in the role tests).
 
+**Lunar calendar, giỗ, events, .ics and reminders (GĐ5; design: `docs/superpowers/specs/2026-10-18-gd5-calendar-design.md`)** —
+`app/core/lunar.py` is Hồ Ngọc Đức's astronomical algorithm with the **UTC+7 meridian** (no lookup table: the Chinese calendar uses UTC+8
+and differs in some years). **`math.floor`, not `int()`, in `_sun_longitude`** — `T` is negative before 2000 and truncation toward zero
+silently broke 1990. Tested against Tết 1975–2027, Trung thu, Giỗ Tổ, leap months and a 50-year day-by-day round trip
+(`tests/test_lunar.py`). **Giỗ are computed, never stored** (`app/core/calendar_items.py`): a lunar death date as entered, a solar one
+only with a full date (converted once; month+day without a year cannot be, and is counted in `incomplete`); every lunar year **after**
+the death year gets one (`years` = giỗ lần thứ N, `None` without a death year); a leap-month death uses the regular month; day 30 in a
+29-day month is day 29. `events` (admin CRUD, audited as `event.*`) are rules expanded over a range: solar or lunar, one-off (needs
+`year`) or yearly (`year` = optional start). **Routers register `calendar_items.vn_today()` through the module** (`calendar_items.vn_today()`,
+not `from … import vn_today`) so tests can patch "today"; Vietnam's date is UTC+7. `/calendar/month|upcoming|convert` are plain reads;
+**`/calendar/feed/<token>.ics` is public by design** (a phone calendar sends no cookie): `trees.calendar_token` is the secret, admins
+create/regenerate (`POST`, which cuts off old subscribers) or remove (`DELETE`) it, any signed-in user of the tree reads it
+(`GET /calendar/subscription`). `app/core/ics.py` writes the feed (CRLF, 75-octet folding at character boundaries, escaped text, all-day
+events, stable UIDs, 30 days back to 2 years ahead). **Reminders:** per user `reminder_days` (subset of 0,1,3,7,14,30; default "7,1") and
+`reminder_email` (`GET/PUT /calendar/reminders`); `app/jobs/reminders.py::send_due_reminders` creates `notifications` rows with
+`INSERT … ON CONFLICT DO NOTHING` on `(user_id, dedupe_key)` — **idempotent**, so the hourly worker (`scripts/run_reminders.py --interval
+3600`, the `worker` service in the root compose) can restart or overlap without duplicates — and emails only when `SMTP_HOST` is set
+(a failing mail server costs the email, never the notification). `GET /notifications`, `POST /notifications/read` (only my own rows).
+
 **Marriages (`app/models/marriage.py`)** let a member have one or more
 recorded spouses over time. A `Marriage` row is just `member_id` +
 `spouse_id` (both FK → `members.id`) + nullable `marriage_year` — a
