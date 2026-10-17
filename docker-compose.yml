@@ -10,8 +10,17 @@
 # ../genealogy-web/docker-compose.yml gọi được http://api:8000 mà không cần
 # publish API ra mọi interface của máy.
 #
+# Cấu hình: file `.env` cạnh compose này (copy từ .env.example) dùng cho CẢ HAI:
+#   - compose thay các ${...} bên dưới bằng nó, và
+#   - app chạy ngoài Docker (`uv run uvicorn/alembic/scripts`) đọc đúng file đó
+# nên các biến POSTGRES_* ở đây trùng tên, trùng giá trị với app (app/core/config.py)
+# và với ../docker-compose.yml. Khác biệt duy nhất: `api` chạy TRONG Docker nối
+# thẳng tới `db:5432` (POSTGRES_HOST/PORT được đặt cứng bên dưới), còn app chạy
+# ngoài Docker nối tới 127.0.0.1:${POSTGRES_PORT}.
+#
 # Mọi port đều chỉ bind 127.0.0.1 và KHÔNG dùng 5432 (hay bị Postgres cài sẵn
-# trên máy chiếm); đổi bằng DB_PORT / TEST_DB_PORT / API_PORT nếu trùng.
+# trên máy chiếm): db dùng POSTGRES_PORT (mặc định 15432), test dùng
+# TEST_DB_PORT (55432), API dùng API_PORT (8000).
 #
 # Test chạy trên Postgres thật (cùng major version với bản deploy), không dùng
 # SQLite nữa — xem tests/conftest.py.
@@ -26,20 +35,23 @@ x-logging: &default-logging
 
 services:
 
-  # Postgres cho dev. Dữ liệu giữ trong volume postgres_data.
+  # Postgres cho dev. Dữ liệu giữ trong volume postgres_data. User/mật khẩu/tên DB
+  # lấy từ .env (mặc định postgres/postgres/genealogy). Chúng chỉ có tác dụng lúc
+  # volume được tạo lần đầu; đổi sau đó mà không `docker compose down -v` thì
+  # Postgres vẫn giữ giá trị cũ.
   db:
     image: postgres:18.6
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: genealogy
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-genealogy}
     volumes:
       # postgres:18+ mount ở /var/lib/postgresql (không phải .../data như bản
       # 16) — image tự tạo thư mục con theo major version. Mount sai chỗ sẽ
       # crash-loop ngay lúc khởi động.
       - postgres_data:/var/lib/postgresql
     ports:
-      - "127.0.0.1:${DB_PORT:-15432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-15432}:5432"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
@@ -78,12 +90,23 @@ services:
   api:
     build: .
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/genealogy
+      # Trong Docker: nối thẳng tới service db (không qua cổng publish ra máy).
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-genealogy}
       JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me}
-      JWT_EXPIRE_MINUTES: 60
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
-      COOKIE_SECURE: "false"
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       UPLOAD_DIR: /app/uploads
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
     volumes:
       - uploads_data:/app/uploads
     ports:

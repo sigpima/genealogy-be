@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Create a new migration (requires a live Postgres reachable via `DATABASE_URL`, already at `head` for existing migrations — autogenerate diffs against its current state, not from scratch): `uv run alembic revision --autogenerate -m "message"`
 - Seed a family tree from a `{name, children}` JSON file: `uv run python scripts/seed_members.py path/to/tree.json [--tree-slug SLUG]`
 - Manage trees/users (replaces the superadmin UI): `uv run python scripts/manage.py --help`
-- **Pointing the app at a throwaway database** (smoke runs): export `DATABASE_URL=...` — it **wins over `POSTGRES_*`** and over nothing else, and a `.env` that sets `DATABASE_URL` is read automatically, so setting only `POSTGRES_*` in the shell silently keeps using the `.env` database. Print the host/db from `get_settings().database_url` before starting anything.
+- **Pointing the app at a throwaway database** (smoke runs): export `POSTGRES_HOST/PORT/USER/PASSWORD/DB` (or `DATABASE_URL`) in the shell — the environment beats `.env`. Still print the host/db from `get_settings().database_url` before starting anything. The dev `.env` (copy of `.env.example`) targets the compose `db` on `127.0.0.1:15432`: `docker compose up -d --wait db && uv run alembic upgrade head`.
 
 This project uses `uv`, not bare `pip`/`venv` — always prefix Python commands with `uv run`.
 
@@ -183,12 +183,16 @@ imports.
   there is only one `DATABASE_URL` env var, not two.
 
 **Settings (`app/core/config.py`)** are read once via `get_settings()`
-(`@lru_cache`-wrapped) from `.env` / environment: `DATABASE_URL` — or, when it
-is unset, `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_USER`/`POSTGRES_PASSWORD`/
-`POSTGRES_DB`, from which the URL is built with SQLAlchemy's `URL.create` so a
-password containing `@ : / # ?` is percent-encoded instead of corrupting the
-URL (the root `docker-compose.yml` uses this form; `DATABASE_URL` wins if both
-are given) —
+(`@lru_cache`-wrapped) from `.env` / environment: `POSTGRES_HOST`/`POSTGRES_PORT`/
+`POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`, from which the URL is built with
+SQLAlchemy's `URL.create` so a password containing `@ : / # ?` is percent-encoded
+instead of corrupting the URL — the **same names in `.env.example`, this
+directory's `docker-compose.yml` and the root `docker-compose.yml`**. A full
+`DATABASE_URL` is still accepted as an override. **Precedence: the process
+environment beats the `.env` file, whichever form each uses** (so a leftover
+`DATABASE_URL` in `.env` cannot hijack a run that sets `POSTGRES_*`, and the test
+suite's `DATABASE_URL` cannot be overridden by a developer's `.env`; within one
+layer `DATABASE_URL` wins) —
 `JWT_SECRET`, `JWT_EXPIRE_MINUTES`, `FRONTEND_ORIGIN`, `COOKIE_SECURE`.
 Never hardcode these — this replaced a legacy Spring Boot backend that had
 a hardcoded JWT secret and a committed plaintext DB password, and that

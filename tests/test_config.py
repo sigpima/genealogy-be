@@ -164,3 +164,70 @@ def test_missing_database_settings_is_a_clear_error(monkeypatch):
 
     with pytest.raises(ValidationError, match="DATABASE_URL"):
         Settings(_env_file=None)
+
+
+# --- precedence: the process environment beats the .env file, whichever form each one uses ----------
+
+
+def _dotenv(tmp_path, *lines):
+    path = tmp_path / ".env"
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+PARTS_IN_FILE = (
+    "POSTGRES_HOST=127.0.0.1",
+    "POSTGRES_PORT=15432",
+    "POSTGRES_USER=postgres",
+    "POSTGRES_PASSWORD=from-file",
+    "POSTGRES_DB=genealogy",
+)
+
+
+def test_dotenv_alone_can_use_the_postgres_parts(monkeypatch, tmp_path):
+    from sqlalchemy.engine import make_url
+
+    _clear_db_env(monkeypatch)
+    url = make_url(Settings(_env_file=_dotenv(tmp_path, *PARTS_IN_FILE)).database_url)
+
+    assert (url.host, url.port, url.database) == ("127.0.0.1", 15432, "genealogy")
+
+
+def test_dotenv_alone_can_still_use_a_full_database_url(monkeypatch, tmp_path):
+    _clear_db_env(monkeypatch)
+    env_file = _dotenv(tmp_path, "DATABASE_URL=postgresql+asyncpg://u:p@filehost/filedb")
+
+    assert Settings(_env_file=env_file).database_url == "postgresql+asyncpg://u:p@filehost/filedb"
+
+
+def test_env_postgres_parts_beat_a_database_url_in_dotenv(monkeypatch, tmp_path):
+    """The mix-up this guards against: a throwaway database set via POSTGRES_* silently ignored because a
+    leftover DATABASE_URL in .env pointed somewhere else."""
+    from sqlalchemy.engine import make_url
+
+    _clear_db_env(monkeypatch)
+    for name, value in (("HOST", "db"), ("USER", "genealogy"), ("PASSWORD", "x"), ("DB", "fresh")):
+        monkeypatch.setenv(f"POSTGRES_{name}", value)
+    env_file = _dotenv(tmp_path, "DATABASE_URL=postgresql+asyncpg://u:p@filehost/filedb")
+
+    url = make_url(Settings(_env_file=env_file).database_url)
+
+    assert (url.host, url.database) == ("db", "fresh")
+
+
+def test_env_database_url_beats_postgres_parts_in_dotenv(monkeypatch, tmp_path):
+    """The test suite relies on this: its DATABASE_URL must win over a developer's .env."""
+    _clear_db_env(monkeypatch)
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@envhost/envdb")
+
+    assert Settings(_env_file=_dotenv(tmp_path, *PARTS_IN_FILE)).database_url == "postgresql+asyncpg://u:p@envhost/envdb"
+
+
+def test_the_error_names_the_postgres_variables_first(monkeypatch):
+    import pytest
+    from pydantic import ValidationError
+
+    _clear_db_env(monkeypatch)
+
+    with pytest.raises(ValidationError, match="POSTGRES_HOST"):
+        Settings(_env_file=None)
