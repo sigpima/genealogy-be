@@ -11,7 +11,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Run a single test: `uv run pytest tests/test_auth.py::test_login_rejects_wrong_password -v`
 - Apply migrations: `uv run alembic upgrade head`
 - Create a new migration (requires a live Postgres reachable via `DATABASE_URL`, already at `head` for existing migrations — autogenerate diffs against its current state, not from scratch): `uv run alembic revision --autogenerate -m "message"`
-- Seed the shared family tree from a `{name, children}` JSON file: `uv run python scripts/seed_members.py path/to/tree.json`
+- Seed a family tree from a `{name, children}` JSON file: `uv run python scripts/seed_members.py path/to/tree.json [--tree-slug SLUG]`
+- Manage trees/users (replaces the superadmin UI): `uv run python scripts/manage.py --help`
+- **Pointing the app at a throwaway database** (smoke runs): export `DATABASE_URL=...` — it **wins over `POSTGRES_*`** and over nothing else, and a `.env` that sets `DATABASE_URL` is read automatically, so setting only `POSTGRES_*` in the shell silently keeps using the `.env` database. Print the host/db from `get_settings().database_url` before starting anything.
 
 This project uses `uv`, not bare `pip`/`venv` — always prefix Python commands with `uv run`.
 
@@ -37,14 +39,15 @@ healthcheck hits `GET /health`.
 ## Architecture
 
 Async FastAPI backend for a genealogy app: auth (register/login/me/logout)
-plus a `Member` CRUD API backing **one shared family tree** — there is no
-per-user ownership, every logged-in user reads/writes the same tree (see
-`docs/superpowers/specs/` for why).
+plus a `Member` CRUD API. One deployment hosts **many families**: every member
+belongs to a tree (`members.tree_id`), every user to one tree (or none, for the
+superadmin), and every `/members/*` route acts on exactly one tree — see the
+"Multi-family trees" section below and `docs/superpowers/specs/` for why.
 
 **`Member` (`app/models/member.py`)** is a single self-referencing table:
 `id`, `full_name`, `parent_id -> members.id` (nullable; `NULL` = root),
-`birth_year`/`death_year` (nullable ints, year-only — no day/month, real
-genealogy records rarely have more), `gender` (nullable, plain
+`birth_year`/`death_year` (nullable ints; GĐ2 added optional month/day and
+calendar flags beside them — see "Profile data (GĐ2)"), `gender` (nullable, plain
 `String(10)`, validated only at the Pydantic layer via `Gender(str, Enum)`
 in `app/schemas/member.py` — not a native Postgres enum type, to keep
 adding a new value a plain code change), `notes` (nullable `Text`,
@@ -56,7 +59,7 @@ on that instead of an explicit `.value` is fragile across Python versions
 and DB drivers (`create_member`/`update_member` in
 `app/routers/member.py` both do this correctly; follow that pattern for
 any new enum-backed field). `app/routers/member.py`'s `GET /members/tree`
-walks the whole table in one query and reconstructs the tree in Python
+walks the tree's members in one query and reconstructs the tree in Python
 (`_build_tree`, a dict keyed by `parent_id`, no recursive SQL), then
 `_to_skeleton` strips it to `{id, name, children}` — the tree response is
 deliberately just the shape, so it stays small for big families. Everything
@@ -85,8 +88,31 @@ to the root and checking whether the member being updated shows up in it
 `RESTRICT` behavior — deleting a member that others reference as
 `parent_id` raises `IntegrityError`, caught and turned into a 409; there
 is no cascading delete, and none should be added without an explicit
-product decision to allow it. All `/members/*` routes require auth via
-the router-level `dependencies=[Depends(get_current_user)]`.
+product decision to allow it. Access control is per route, not router-level:
+reads use `get_read_context`, writes `get_write_context` (see "Multi-family
+trees" below).
+
+**Profile data (GĐ2; design: `docs/superpowers/specs/2026-10-17-gd2-profile-data-design.md`)** —
+`members` also has `hometown`, `phone`, `email` (phone/email are **hidden from guests**), partial dates
+(`birth_month`/`birth_day`/`death_month`/`death_day`, each optional and valid **without a year**, so a giỗ needs only a lunar
+day+month) with calendar flags `birth_is_lunar` (default false), `death_is_lunar` (default **true**) and `*_leap_month`,
+`birth_order` (manual sibling order), `is_adopted`, and `mother_id` (FK → `members.id`, `ON DELETE SET NULL`).
+Validation lives in `_ProfileFields` (`app/schemas/member.py`): day needs month, lunar day ≤ 30, a real calendar date when
+year+month+day are all solar, leap flag only on a lunar month, same-year death-before-birth rejected when both dates use the same
+calendar, phone chars `0-9 + - ( ) . space`, email via `email_validator` (no deliverability check). **`mother_id` must be a
+recorded spouse of the father** (`_check_mother`, 400) and requires `parent_id`, so changing the father forces the client to
+send a new/empty mother. Ordering: siblings sort by `birth_order` (set first), then creation id in `/members/tree`; `sibling_rank`
+uses `birth_order`, then birth year, then id; a member's spouses are listed by `marriage_year` (unknown last). Writes go through
+`_assign` over `PROFILE_FIELDS` (shared by POST/PUT/PATCH/CSV) — **add a new column to `PROFILE_FIELDS`, the schemas, `MemberRead`/
+`MemberDetail`, the CSV columns and the web `profileToPayload`** or PUT (a full replacement) will silently wipe it.
+
+**Data-entry tools (`app/routers/member_tools.py`, admin-only, per tree; registered *before* `member.router` so
+`/members/table` beats `/members/{id}`)** — `PATCH /members/{id}` (only the fields sent; merged onto the stored member and validated
+as a `MemberUpdate`, `null` clears), `GET /members/table` (paged, depth-first order, filters `q`/`generation`/`under`/repeatable
+`missing`; spouses are not rows), `GET /members/completeness`, `POST /members/{id}/split` (2–50 names; 409 if the member has children
+or a spouse), `GET /members/export.csv` (UTF-8 + BOM) and `POST /members/import?dry_run=` (CSV: row with `id` updates, row
+without creates a child; blank cell = unchanged, `-` clears/resets a flag; **all-or-nothing** with a per-row 422 error list; cycle,
+duplicate-id, foreign-tree and mother checks happen in memory row by row; 5 MB / 10,000 rows).
 
 **Marriages (`app/models/marriage.py`)** let a member have one or more
 recorded spouses over time. A `Marriage` row is just `member_id` +
@@ -223,7 +249,7 @@ is created if none exists; everybody else joins the resolved tree as a `member` 
 registration mode (400 when several trees exist and no cookie says which; 403 when closed).
 `login` answers 403 `account_pending` / `account_disabled`, and `get_current_user` re-checks `status`
 on every request, so disabling an account kills its token at once. Guests get a **redacted**
-`MemberDetail` (no `notes`, `residence`, `burial_*`); `/uploads/*` (avatars) is still served
+`MemberDetail` (no `notes`, `residence`, `burial_*`, `phone`, `email`); `/uploads/*` (avatars) is still served
 statically without auth (random UUID names only) — tighten before relying on private mode for photos.
 Admin endpoints (`app/routers/admin.py`) act on the resolved tree only: `GET/POST /admin/users`,
 `PATCH /admin/users/{id}` (role admin/member and status; **the last active admin of a tree can never be
