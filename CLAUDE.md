@@ -131,6 +131,23 @@ read (counts = whole subtree, sub-branches included), writes are admin-only, ano
 `MemberDetail.branch` carries `{id, name, color}`. Revisit the in-memory approach (add a SQL index) only if a tree passes
 ~10,000 people.
 
+**Change requests and audit log (GĐ4; design: `docs/superpowers/specs/2026-10-18-gd4-change-requests-design.md`)** —
+members never write to `/members/*`; they **propose** through `/requests` (`app/routers/requests.py`, `get_user_context` = any signed-in
+user) and an admin approves. Kinds: `edit` (fields in `PROPOSABLE` = writable fields minus `parent_id`/`mother_id`), `add_child`,
+`report` (text only, min 5 chars). A proposal is validated like `PATCH`/`POST` (merged onto the current data through
+`MemberUpdate`/`MemberCreate`), stored as the **minimal, normalised** `changes` plus `base` (the person's values then), and a no-op is a
+422. `GET /requests` shows admins every request of the tree and everybody else only their own (another tree's or someone else's is 404);
+`/requests/summary` is the sidebar badge count. Approve applies the change through the **same code as a direct edit**
+(`_apply_update(..., commit=False)` / `add_member`), so every validation and the audit entry apply, then closes the request in the same
+transaction; any failure (person deleted, data no longer valid) rolls back and answers 409 leaving it pending. Reject needs a note; decided
+requests are 409; only the requester cancels (404 for others). `diff` is computed on read and flags `stale` when a pending request's
+fields changed since `base`. Emails (`send_email`, `_notify`) go to the tree's active admins on arrival and to the requester on a decision,
+only when `SMTP_HOST` is set, and **never block or fail the action**. The **audit log** (`app/core/audit.py`, `audit_log` table, read by
+`GET /audit`, admin only) is written by `audit_member`/`audit.record` **in the caller's transaction** for member
+create/update/delete/split/avatar, marriage create/update, CSV import (one entry per changed person), branch create/update/delete and
+request decisions; `member_id` has no FK so a deleted person's history survives, creation/deletion entries list only non-default fields.
+**Any new write route must call `audit_member`/`audit.record`** (and be added to the admin-only list in the role tests).
+
 **Marriages (`app/models/marriage.py`)** let a member have one or more
 recorded spouses over time. A `Marriage` row is just `member_id` +
 `spouse_id` (both FK → `members.id`) + nullable `marriage_year` — a
