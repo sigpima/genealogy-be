@@ -16,6 +16,7 @@ class Media(Base):
     tree_id: Mapped[int] = mapped_column(ForeignKey("trees.id"), index=True, nullable=False)
     member_id: Mapped[int | None] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"), index=True, nullable=True)
     place_id: Mapped[int | None] = mapped_column(ForeignKey("places.id", ondelete="CASCADE"), index=True, nullable=True)
+    article_id: Mapped[int | None] = mapped_column(ForeignKey("articles.id", ondelete="CASCADE"), index=True, nullable=True)
     kind: Mapped[str] = mapped_column(String(10), nullable=False)  # image | document
     original_name: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(50), nullable=False)

@@ -184,6 +184,18 @@ both are in `PROFILE_FIELDS`, the CSV columns and the redaction list, and are **
 and leaves the old fields alone; idempotent. Events can have a `place_id` (calendar items then show the place as their location).
 Pillow was added with `uv add pillow` (the Dockerfile installs from `uv.lock`, so the lock must be updated with the dependency).
 
+**Chronicles (GĐ7; design: `docs/superpowers/specs/2026-10-19-gd7-chronicles-design.md`)** — `articles` (`app/routers/articles.py`): Markdown `body`
+(≤ 100,000 chars), `kind` origin|lineage|precepts|event|person|other, `status` draft|published, `pinned`, `position`, `cover_media_id`; the slug is made
+from the title (`make_slug`: folded, hyphenated, `-2`/`-3` on a clash, `bai-viet` when nothing is left) and **never changes after creation**, so links
+survive renames. **Readers:** members and guests of a public tree see published articles only; drafts (and `GET /members/{id}/articles` drafts) are
+admin-only; another tree is 404. `article_members` holds the people an article mentions, chosen by the admin (nothing is parsed from the text; ids of
+another tree → 404). Article photos are `media` rows with `article_id` (`/articles/{id}/media`, same rules as GĐ6: admin upload, signed-in viewers
+only); **a cover must be one of the article's own images** (`_check_cover`), and `articles.cover_media_id`/`media.article_id` reference each other, so
+the cover FK is created with `use_alter` / in the migration after both tables exist. `POST /articles/reorder` sets `position`; the list order is
+pinned, position, newest. `timeline_entries` (`/timeline`: year 1–2200, optional month/day, a day needs its month and must exist, optional person and
+article; listed by date with undated parts first) and `generation_words` (`PUT /generation-poem` replaces the whole bài đệm, one word per generation, ≤ 200)
+are read like articles and written by admins; every write is audited (`article.*`, `timeline.*`, `poem.update`).
+
 **Marriages (`app/models/marriage.py`)** let a member have one or more
 recorded spouses over time. A `Marriage` row is just `member_id` +
 `spouse_id` (both FK → `members.id`) + nullable `marriage_year` — a

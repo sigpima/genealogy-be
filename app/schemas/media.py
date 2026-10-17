@@ -14,6 +14,7 @@ class MediaRead(BaseModel):
     caption: str | None
     member_id: int | None
     place_id: int | None
+    article_id: int | None = None
     url: str
     thumb_url: str | None
     created_at: datetime

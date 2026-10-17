@@ -6,11 +6,13 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.routers.admin import router as admin_router
+from app.routers.articles import router as articles_router
 from app.routers.audit import router as audit_router
 from app.routers.auth import router as auth_router
 from app.routers.branches import router as branches_router
 from app.routers.calendar import router as calendar_router
 from app.routers.events import router as events_router
+from app.routers.generation_words import router as generation_words_router
 from app.routers.member import router as member_router
 from app.routers.media import router as media_router
 from app.routers.member_search import router as member_search_router
@@ -18,6 +20,7 @@ from app.routers.member_tools import router as member_tools_router
 from app.routers.notifications import router as notifications_router
 from app.routers.places import router as places_router
 from app.routers.requests import router as requests_router
+from app.routers.timeline import router as timeline_router
 from app.routers.site import router as site_router
 from app.routers.trees import router as trees_router
 from app.routers.uploads import router as uploads_router
@@ -51,6 +54,9 @@ app.include_router(events_router)
 app.include_router(notifications_router)
 app.include_router(places_router)
 app.include_router(media_router)
+app.include_router(articles_router)
+app.include_router(timeline_router)
+app.include_router(generation_words_router)
 app.include_router(trees_router)
 app.include_router(uploads_router)
 

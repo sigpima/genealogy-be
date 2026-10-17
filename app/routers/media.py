@@ -14,6 +14,7 @@ from app.core.media_processing import MAX_BYTES, MediaRejected, process_upload
 from app.core.permissions import get_user_context, get_write_context
 from app.core.tenancy import TreeContext
 from app.db.session import get_db
+from app.models.article import Article
 from app.models.media import Media
 from app.models.member import Member
 from app.models.place import Place
@@ -34,14 +35,19 @@ def _read(row: Media) -> MediaRead:
         caption=row.caption,
         member_id=row.member_id,
         place_id=row.place_id,
+        article_id=row.article_id,
         url=f"/uploads/media/{row.stored_name}",
         thumb_url=f"/uploads/media/thumbs/{row.thumb_name}" if row.thumb_name else None,
         created_at=row.created_at,
     )
 
 
-async def _owner(db: AsyncSession, ctx: TreeContext, kind: str, owner_id: int) -> Member | Place:
-    row = await db.get(Member if kind == "member" else Place, owner_id)
+OWNER_MODELS = {"member": Member, "place": Place, "article": Article}
+OWNER_COLUMNS = {"member": Media.member_id, "place": Media.place_id, "article": Media.article_id}
+
+
+async def _owner(db: AsyncSession, ctx: TreeContext, kind: str, owner_id: int) -> Member | Place | Article:
+    row = await db.get(OWNER_MODELS[kind], owner_id)
     if row is None or row.tree_id != ctx.tree.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{kind} not found")
     return row
@@ -49,7 +55,7 @@ async def _owner(db: AsyncSession, ctx: TreeContext, kind: str, owner_id: int) -
 
 async def _list(db: AsyncSession, ctx: TreeContext, kind: str, owner_id: int) -> list[MediaRead]:
     await _owner(db, ctx, kind, owner_id)
-    column = Media.member_id if kind == "member" else Media.place_id
+    column = OWNER_COLUMNS[kind]
     rows = (await db.execute(select(Media).where(Media.tree_id == ctx.tree.id, column == owner_id).order_by(Media.id))).scalars().all()
     return [_read(r) for r in rows]
 
@@ -73,6 +79,7 @@ async def _upload(db: AsyncSession, ctx: TreeContext, kind: str, owner_id: int, 
         tree_id=ctx.tree.id,
         member_id=owner.id if kind == "member" else None,
         place_id=owner.id if kind == "place" else None,
+        article_id=owner.id if kind == "article" else None,
         kind=processed.kind,
         original_name=(file.filename or "file")[:255],
         content_type=processed.content_type,
@@ -96,7 +103,7 @@ async def _upload(db: AsyncSession, ctx: TreeContext, kind: str, owner_id: int, 
     return _read(row)
 
 
-def _audit(db: AsyncSession, ctx: TreeContext, action: str, row: Media, owner: Member | Place, kind: str, changes: dict | None) -> None:
+def _audit(db: AsyncSession, ctx: TreeContext, action: str, row: Media, owner: Member | Place | Article, kind: str, changes: dict | None) -> None:
     audit.record(
         db,
         tree_id=ctx.tree.id,
@@ -110,6 +117,7 @@ def _audit(db: AsyncSession, ctx: TreeContext, action: str, row: Media, owner: M
             "original_name": row.original_name,
             "kind": row.kind,
             **({"place_id": owner.id, "place_name": owner.name} if kind == "place" else {}),
+            **({"article_id": owner.id, "article_title": owner.title} if kind == "article" else {}),
         },
     )
 
@@ -146,13 +154,29 @@ async def upload_place_media(
     return await _upload(db, ctx, "place", place_id, file, caption)
 
 
-async def _row_in_tree(db: AsyncSession, ctx: TreeContext, media_id: int) -> tuple[Media, Member | Place, str]:
+async def _row_in_tree(db: AsyncSession, ctx: TreeContext, media_id: int) -> tuple[Media, Member | Place | Article, str]:
     row = await db.get(Media, media_id)
     if row is None or row.tree_id != ctx.tree.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="media not found")
-    kind = "member" if row.member_id is not None else "place"
-    owner = await db.get(Member if kind == "member" else Place, row.member_id or row.place_id)
+    kind = "member" if row.member_id is not None else "place" if row.place_id is not None else "article"
+    owner = await db.get(OWNER_MODELS[kind], row.member_id or row.place_id or row.article_id)
     return row, owner, kind
+
+
+@router.get("/articles/{article_id}/media", response_model=list[MediaRead])
+async def list_article_media(article_id: int, db: AsyncSession = Depends(get_db), ctx: TreeContext = Depends(get_user_context)) -> list[MediaRead]:
+    return await _list(db, ctx, "article", article_id)
+
+
+@router.post("/articles/{article_id}/media", response_model=MediaRead, status_code=status.HTTP_201_CREATED)
+async def upload_article_media(
+    article_id: int,
+    file: UploadFile = File(...),
+    caption: str | None = Form(default=None),
+    db: AsyncSession = Depends(get_db),
+    ctx: TreeContext = Depends(get_write_context),
+) -> MediaRead:
+    return await _upload(db, ctx, "article", article_id, file, caption)
 
 
 @router.patch("/media/{media_id}", response_model=MediaRead)

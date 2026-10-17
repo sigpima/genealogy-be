@@ -11,6 +11,7 @@ sys.path.append(os.getcwd())
 from app.core.config import get_settings  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.models import (  # noqa: E402,F401  (registers models on Base.metadata)
+    article,
     audit_log,
     branch,
     change_request,
