@@ -21,3 +21,19 @@ def send_password_reset_email(to_email: str, reset_url: str) -> None:
         if settings.smtp_username:
             server.login(settings.smtp_username, settings.smtp_password)
         server.send_message(message)
+
+
+def send_email(to_email: str, subject: str, body: str) -> None:
+    """A plain-text notification. Callers decide whether SMTP is configured and swallow failures."""
+    settings = get_settings()
+    message = MIMEText(body, _charset="utf-8")
+    message["Subject"] = subject
+    message["From"] = settings.smtp_from or settings.smtp_username
+    message["To"] = to_email
+
+    with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
+        if settings.smtp_use_tls:
+            server.starttls()
+        if settings.smtp_username:
+            server.login(settings.smtp_username, settings.smtp_password)
+        server.send_message(message)

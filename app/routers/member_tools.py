@@ -20,7 +20,8 @@ from app.db.session import get_db
 from app.models.marriage import Marriage
 from app.models.member import Member
 from app.core.tree_layout import TreeLayout, load_layout
-from app.routers.member import _assign, _member_in_tree, member_values
+from app.core import audit
+from app.routers.member import _assign, _member_in_tree, audit_member, member_defaults, member_values
 from app.schemas.member import Gender, MemberCreate, MemberRead, MemberUpdate
 
 router = APIRouter(prefix="/members", tags=["member tools"])
@@ -170,12 +171,22 @@ async def split_member(
         )
 
     template = member_values(member)
+    original_name = member.full_name
     member.full_name = payload.names[0]
     created = [member]
     for name in payload.names[1:]:
         sibling = Member(tree_id=ctx.tree.id, **{**template, "full_name": name})
         db.add(sibling)
         created.append(sibling)
+    await db.flush()
+    audit_member(
+        db,
+        ctx,
+        "member.split",
+        member,
+        {"full_name": [original_name, member.full_name]},
+        details={"new_ids": [m.id for m in created[1:]], "new_names": payload.names[1:]},
+    )
     await db.commit()
     for item in created:
         await db.refresh(item)
@@ -391,11 +402,19 @@ async def import_csv(
     if errors:
         raise _import_errors(errors)
     if not dry_run:
+        defaults = member_defaults()
         for member, payload in plan:
             target = member if member is not None else Member(tree_id=ctx.tree.id)
+            before = member_values(target) if member is not None else None
             _assign(target, payload)
             if member is None:
                 db.add(target)
+                await db.flush()
+                audit_member(db, ctx, "member.create", target, audit.creation_changes(member_values(target), defaults), details={"via": "csv"})
+            else:
+                changes = audit.diff_values(before, member_values(target))
+                if changes:
+                    audit_member(db, ctx, "member.update", target, changes, details={"via": "csv"})
         await db.commit()
     return ImportResult(dry_run=dry_run, created=created, updated=updated, unchanged=unchanged)
 

@@ -5,6 +5,7 @@
 - `get_read_context`: who may *read* and which tree: an active user (their tree), or a guest when
   the tree is public.
 - `get_write_context`: an admin/superadmin and the tree they act on.
+- `get_user_context`: any signed-in active user (not a guest) and their tree.
 - `require_superadmin`: the platform owner only (managing trees).
 - `can_read_tree`: may this request read a given tree? (for files, which carry no tree context)
 """
@@ -29,6 +30,13 @@ async def require_superadmin(current_user: User = Depends(get_current_user)) -> 
     if current_user.role != ROLE_SUPERADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="superadmin only")
     return current_user
+
+
+async def get_user_context(
+    request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+) -> TreeContext:
+    """Any signed-in, active user and the tree they act on (no guests): the door for proposing changes."""
+    return TreeContext(tree=await tree_for_user(user, request, db), user=user)
 
 
 async def get_write_context(

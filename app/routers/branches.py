@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import audit
 from app.core.permissions import get_read_context, get_write_context
 from app.core.tenancy import TreeContext
 from app.core.tree_layout import load_layout
@@ -89,6 +90,17 @@ async def create_branch(
         root_member_id=payload.root_member_id,
     )
     db.add(branch)
+    head = await db.get(Member, payload.root_member_id)
+    audit.record(
+        db,
+        tree_id=ctx.tree.id,
+        actor=ctx.user,
+        action="branch.create",
+        member_id=head.id,
+        member_name=head.full_name,
+        changes={"name": [None, branch.name], "color": [None, branch.color], "description": [None, branch.description]},
+        details={"branch_name": branch.name},
+    )
     try:
         await db.commit()
     except IntegrityError:  # two admins racing for the same head
@@ -108,11 +120,26 @@ async def update_branch(
     branch = await _branch_in_tree(db, ctx, branch_id)
     await _head_in_tree(db, ctx, payload.root_member_id)
     await _ensure_head_is_free(db, payload.root_member_id, except_branch=branch.id)
+    before = {"name": branch.name, "color": branch.color, "description": branch.description, "root_member_id": branch.root_member_id}
     branch.name = payload.name
     branch.root_member_id = payload.root_member_id
     branch.description = payload.description
     if payload.color is not None:
         branch.color = payload.color
+    after = {"name": branch.name, "color": branch.color, "description": branch.description, "root_member_id": branch.root_member_id}
+    changes = audit.diff_values(before, after)
+    if changes:
+        head = await db.get(Member, branch.root_member_id)
+        audit.record(
+            db,
+            tree_id=ctx.tree.id,
+            actor=ctx.user,
+            action="branch.update",
+            member_id=head.id,
+            member_name=head.full_name,
+            changes=changes,
+            details={"branch_name": branch.name},
+        )
     await db.commit()
     return await _one(db, ctx, branch.id)
 
@@ -122,5 +149,16 @@ async def delete_branch(
     branch_id: int, db: AsyncSession = Depends(get_db), ctx: TreeContext = Depends(get_write_context)
 ) -> None:
     branch = await _branch_in_tree(db, ctx, branch_id)
+    head = await db.get(Member, branch.root_member_id)
+    audit.record(
+        db,
+        tree_id=ctx.tree.id,
+        actor=ctx.user,
+        action="branch.delete",
+        member_id=head.id,
+        member_name=head.full_name,
+        changes={"name": [branch.name, None], "color": [branch.color, None], "description": [branch.description, None]},
+        details={"branch_name": branch.name},
+    )
     await db.delete(branch)
     await db.commit()

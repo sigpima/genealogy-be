@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import audit
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.marriage import Marriage
@@ -67,6 +68,38 @@ WRITABLE_FIELDS = ("full_name", "parent_id", "mother_id", "gender", *PROFILE_FIE
 def member_values(member: Member) -> dict:
     """The member's writable fields as a `MemberUpdate`-shaped dict (used to merge PATCH and CSV rows)."""
     return {field: getattr(member, field) for field in WRITABLE_FIELDS}
+
+
+def member_defaults() -> dict:
+    """What a field holds when nothing was entered (the audit log leaves these out of a creation/deletion entry)."""
+    return {
+        name: field.default
+        for name, field in MemberCreate.model_fields.items()
+        if name in WRITABLE_FIELDS and not field.is_required()
+    }
+
+
+def audit_member(
+    db: AsyncSession,
+    ctx: TreeContext,
+    action: str,
+    member: Member,
+    changes: dict | None = None,
+    *,
+    details: dict | None = None,
+    request_id: int | None = None,
+) -> None:
+    audit.record(
+        db,
+        tree_id=ctx.tree.id,
+        actor=ctx.user,
+        action=action,
+        member_id=member.id,
+        member_name=member.full_name,
+        changes=changes,
+        details=details,
+        request_id=request_id,
+    )
 
 
 def _assign(member: Member, payload: MemberCreate | MemberUpdate) -> None:
@@ -297,16 +330,34 @@ async def create_member(
 
     await _check_mother(db, payload.parent_id, payload.mother_id)
 
-    member = Member(tree_id=ctx.tree.id)
-    _assign(member, payload)
-    db.add(member)
+    member = await add_member(db, ctx, payload)
     await db.commit()
     await db.refresh(member)
     return member
 
 
+async def add_member(
+    db: AsyncSession, ctx: TreeContext, payload: MemberCreate, *, request_id: int | None = None
+) -> Member:
+    """Insert a member and its audit entry into the caller's transaction (the caller commits)."""
+    member = Member(tree_id=ctx.tree.id)
+    _assign(member, payload)
+    db.add(member)
+    await db.flush()
+    audit_member(
+        db, ctx, "member.create", member, audit.creation_changes(member_values(member), member_defaults()), request_id=request_id
+    )
+    return member
+
+
 async def _apply_update(
-    db: AsyncSession, ctx: TreeContext, member: Member, payload: MemberUpdate
+    db: AsyncSession,
+    ctx: TreeContext,
+    member: Member,
+    payload: MemberUpdate,
+    *,
+    commit: bool = True,
+    request_id: int | None = None,
 ) -> Member:
     if payload.parent_id is not None:
         if payload.parent_id == member.id:
@@ -324,9 +375,16 @@ async def _apply_update(
             )
     await _check_mother(db, payload.parent_id, payload.mother_id)
 
+    before = member_values(member)
     _assign(member, payload)
-    await db.commit()
-    await db.refresh(member)
+    changes = audit.diff_values(before, member_values(member))
+    if changes:
+        audit_member(db, ctx, "member.update", member, changes, request_id=request_id)
+    if commit:
+        await db.commit()
+        await db.refresh(member)
+    else:
+        await db.flush()
     return member
 
 
@@ -374,6 +432,7 @@ async def delete_member(
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
 
+    audit_member(db, ctx, "member.delete", member, audit.deletion_changes(member_values(member), member_defaults()))
     await db.delete(member)
     try:
         await db.commit()
@@ -412,6 +471,14 @@ async def create_marriage(
 
     marriage = Marriage(member_id=member_id, spouse_id=spouse.id, marriage_year=payload.marriage_year)
     db.add(marriage)
+    audit_member(
+        db,
+        ctx,
+        "marriage.create",
+        member,
+        {"spouse_full_name": [None, spouse.full_name], "marriage_year": [None, payload.marriage_year]},
+        details={"spouse_id": spouse.id},
+    )
     await db.commit()
     await db.refresh(spouse)
     await db.refresh(marriage)
@@ -430,12 +497,28 @@ async def update_marriage(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="marriage not found")
 
     spouse = await db.get(Member, marriage.spouse_id)
+    husband = await db.get(Member, marriage.member_id)
+
+    def snapshot() -> dict:
+        return {
+            "marriage_year": marriage.marriage_year,
+            "spouse_full_name": spouse.full_name,
+            "spouse_birth_year": spouse.birth_year,
+            "spouse_death_year": spouse.death_year,
+            "spouse_gender": spouse.gender,
+            "spouse_notes": spouse.notes,
+        }
+
+    before = snapshot()
     marriage.marriage_year = payload.marriage_year
     spouse.full_name = payload.spouse_full_name
     spouse.birth_year = payload.spouse_birth_year
     spouse.death_year = payload.spouse_death_year
     spouse.gender = payload.spouse_gender.value if payload.spouse_gender is not None else None
     spouse.notes = payload.spouse_notes
+    changes = audit.diff_values(before, snapshot())
+    if changes:
+        audit_member(db, ctx, "marriage.update", husband, changes, details={"spouse_id": spouse.id})
     await db.commit()
     await db.refresh(spouse)
     await db.refresh(marriage)
@@ -472,6 +555,7 @@ async def upload_avatar(
     (avatars_dir / filename).write_bytes(contents)
 
     avatar_url = f"/uploads/avatars/{filename}"
+    audit_member(db, ctx, "member.avatar", member, {"avatar_url": [member.avatar_url, avatar_url]})
     member.avatar_url = avatar_url
     await db.commit()
     return {"avatar_url": avatar_url}
@@ -489,5 +573,7 @@ async def delete_avatar(
 
     settings = get_settings()
     _delete_avatar_file(settings.upload_dir, member.avatar_url)
+    if member.avatar_url:
+        audit_member(db, ctx, "member.avatar", member, {"avatar_url": [member.avatar_url, None]})
     member.avatar_url = None
     await db.commit()
