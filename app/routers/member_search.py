@@ -11,14 +11,17 @@ from difflib import SequenceMatcher
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.overview import compute_overview
 from app.core.permissions import get_read_context
 from app.core.tenancy import TreeContext
 from app.core.text import fold
 from app.core.tree_layout import TreeLayout, load_branches, load_layout, member_status
 from app.db.session import get_db
 from app.models.branch import Branch
+from app.models.media import Media
 from app.models.member import Member
 from app.schemas.branch import BranchRef
 from app.schemas.search import (
@@ -236,3 +239,14 @@ async def stats(
         by_branch=[BranchCount(id=b.id, name=b.name, color=b.color, count=per_branch[b.id]) for b in ordered_branches],
         without_branch=without_branch,
     )
+
+
+@router.get("/stats/overview")
+async def stats_overview(db: AsyncSession = Depends(get_db), ctx: TreeContext = Depends(get_read_context)) -> dict:
+    """Everything the statistics page shows (see app/core/overview.py). Aggregates only, so a public tree's guests get it too."""
+    branches = await load_branches(db, ctx.tree.id)
+    layout = await load_layout(db, ctx.tree.id, branches)
+    with_photos = set(
+        (await db.execute(select(Media.member_id).where(Media.tree_id == ctx.tree.id, Media.member_id.is_not(None)).distinct())).scalars().all()
+    )
+    return compute_overview(layout, branches, with_photos)

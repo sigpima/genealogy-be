@@ -196,6 +196,15 @@ pinned, position, newest. `timeline_entries` (`/timeline`: year 1–2200, option
 article; listed by date with undated parts first) and `generation_words` (`PUT /generation-poem` replaces the whole bài đệm, one word per generation, ≤ 200)
 are read like articles and written by admins; every write is audited (`article.*`, `timeline.*`, `poem.update`).
 
+**Statistics overview (GĐ8; design: `docs/superpowers/specs/2026-10-19-gd8-statistics-design.md`)** — `GET /stats/overview`
+(`app/routers/member_search.py`, `app/core/overview.py::compute_overview`, a pure function of a `TreeLayout`) over **blood members** (spouses are counted
+once, separately): totals and the living/deceased/unknown rule, gender (also per generation), per branch, **lifespan** (deceased with both years and an age of
+0–120, so a typo like a 200-year life is ignored; mean/median/min/max, by gender), birth decades, children (parents, average per parent, childless, the person with
+most children — ties go to the lowest id), the **longest line** (the first deepest person in tree order and the chain of names up to the root), the commonest
+middle names (the word after the surname, names of 3+ words) and given names (last word) — **counted with accents folded and shown in the commonest spelling**
+— and `completeness` (`have/total` for gender, birth year, birth day+month, hometown, residence, avatar, any photo). Aggregates only, so guests of a public
+tree may read it. `/members/table?missing=` gained `avatar`.
+
 **Marriages (`app/models/marriage.py`)** let a member have one or more
 recorded spouses over time. A `Marriage` row is just `member_id` +
 `spouse_id` (both FK → `members.id`) + nullable `marriage_year` — a

@@ -82,7 +82,7 @@ async def members_table(
     q: str | None = None,
     generation: int | None = Query(default=None, ge=1),
     under: int | None = None,
-    missing: Annotated[list[Literal["gender", "birth_year", "hometown", "death_year"]] | None, Query()] = None,
+    missing: Annotated[list[Literal["gender", "birth_year", "hometown", "death_year", "avatar"]] | None, Query()] = None,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -102,7 +102,7 @@ async def members_table(
             continue
         if needle is not None and needle not in member.full_name.casefold():
             continue
-        if missing and any(getattr(member, field) is not None for field in missing):
+        if missing and any(getattr(member, "avatar_url" if field == "avatar" else field) is not None for field in missing):
             continue  # "missing X" means X is empty; several chips all have to be empty
         rows.append(member)
     return TablePage(total=len(rows), items=[_row(m, layout) for m in rows[offset : offset + limit]])
