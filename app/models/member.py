@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, SmallInteger, String, Text, false, func, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -24,6 +24,22 @@ class Member(Base):
     burial_place: Mapped[str | None] = mapped_column(String(500), nullable=True)
     burial_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     burial_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hometown: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Partial dates: year may be unknown while month/day are known (a giỗ needs only the lunar month+day).
+    birth_month: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    birth_day: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    death_month: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    death_day: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    birth_is_lunar: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
+    birth_leap_month: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
+    death_is_lunar: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=true())
+    death_leap_month: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
+    birth_order: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)  # manual order among siblings
+    is_adopted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
+    # The mother must be a recorded spouse of the father (parent_id); checked by the API, not the DB.
+    mother_id: Mapped[int | None] = mapped_column(ForeignKey("members.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

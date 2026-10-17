@@ -46,6 +46,42 @@ def _delete_avatar_file(upload_dir: str, avatar_url: str | None) -> None:
     Path(upload_dir, relative_path).unlink(missing_ok=True)
 
 
+# Everything an admin may write on a member besides the name/parent/gender handled by `_assign`.
+PROFILE_FIELDS = (
+    "birth_year", "death_year", "notes", "courtesy_name", "title", "residence", "hometown",
+    "phone", "email", "burial_place", "burial_latitude", "burial_longitude",
+    "birth_month", "birth_day", "death_month", "death_day",
+    "birth_is_lunar", "birth_leap_month", "death_is_lunar", "death_leap_month",
+    "birth_order", "is_adopted",
+)
+
+
+def _assign(member: Member, payload: MemberCreate | MemberUpdate) -> None:
+    """Copy every writable field of the payload onto the member (full replacement: omitted -> default)."""
+    member.full_name = payload.full_name
+    member.parent_id = payload.parent_id
+    member.mother_id = payload.mother_id
+    member.gender = payload.gender.value if payload.gender is not None else None
+    for field in PROFILE_FIELDS:
+        setattr(member, field, getattr(payload, field))
+
+
+async def _check_mother(db: AsyncSession, father_id: int | None, mother_id: int | None) -> None:
+    """A mother is only meaningful as one of the father's recorded spouses (a tree has no free-standing mothers)."""
+    if mother_id is None:
+        return
+    if father_id is not None:
+        result = await db.execute(
+            select(Marriage.id).where(Marriage.member_id == father_id, Marriage.spouse_id == mother_id)
+        )
+        if result.first() is not None:
+            return
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="mother must be a recorded spouse of the father",
+    )
+
+
 def _spouse_info(marriage: Marriage, spouse: Member) -> SpouseInfo:
     return SpouseInfo(
         marriage_id=marriage.id,
@@ -69,6 +105,8 @@ def _build_tree(members: list[Member], marriages: list[Marriage]) -> MemberTreeN
     children_by_parent: dict[int | None, list[Member]] = {}
     for member in members:
         children_by_parent.setdefault(member.parent_id, []).append(member)
+    for siblings in children_by_parent.values():  # a manual birth order wins; ties and unset keep creation order
+        siblings.sort(key=lambda m: (m.birth_order is None, m.birth_order or 0, m.id))
 
     root_candidates = [
         member for member in children_by_parent.get(None, []) if member.id not in spouse_ids
@@ -106,7 +144,7 @@ def _to_skeleton(node: MemberTreeNode) -> MemberSkeletonNode:
 
 
 def _sibling_rank(member: Member, siblings: list[Member]) -> str | None:
-    """Trưởng/Thứ/Út among same-gender siblings, ordered by birth year (unknown last), then id.
+    """Trưởng/Thứ/Út among same-gender siblings: manual birth_order first, then birth year (unknown last), then id.
 
     `siblings` must include `member` itself. None for a member with no parent or no male/female gender.
     """
@@ -114,7 +152,9 @@ def _sibling_rank(member: Member, siblings: list[Member]) -> str | None:
         return None
     same_gender = sorted(
         (s for s in siblings if s.gender == member.gender),
-        key=lambda s: (s.birth_year is None, s.birth_year or 0, s.id),
+        key=lambda s: (
+            s.birth_order is None, s.birth_order or 0, s.birth_year is None, s.birth_year or 0, s.id
+        ),
     )
     position = next((i for i, s in enumerate(same_gender) if s.id == member.id), None)
     if position is None:
@@ -173,7 +213,9 @@ async def get_member_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
 
     marriages_result = await db.execute(
-        select(Marriage).where(Marriage.member_id == member_id).order_by(Marriage.id)
+        select(Marriage)
+        .where(Marriage.member_id == member_id)
+        .order_by(Marriage.marriage_year.is_(None), Marriage.marriage_year, Marriage.id)
     )
     marriages = list(marriages_result.scalars().all())
     spouses = []
@@ -199,8 +241,22 @@ async def get_member_detail(
         title=member.title,
         sibling_rank=sibling_rank,
         spouses=spouses,
+        hometown=member.hometown,
+        birth_month=member.birth_month,
+        birth_day=member.birth_day,
+        death_month=member.death_month,
+        death_day=member.death_day,
+        birth_is_lunar=member.birth_is_lunar,
+        birth_leap_month=member.birth_leap_month,
+        death_is_lunar=member.death_is_lunar,
+        death_leap_month=member.death_leap_month,
+        birth_order=member.birth_order,
+        is_adopted=member.is_adopted,
+        mother_id=member.mother_id,
     )
     if ctx.user is not None:  # guests (public tree) only get the fields above
+        detail.phone = member.phone
+        detail.email = member.email
         detail.notes = member.notes
         detail.residence = member.residence
         detail.burial_place = member.burial_place
@@ -220,21 +276,10 @@ async def create_member(
         if parent is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="parent not found")
 
-    member = Member(
-        tree_id=ctx.tree.id,
-        full_name=payload.full_name,
-        parent_id=payload.parent_id,
-        birth_year=payload.birth_year,
-        death_year=payload.death_year,
-        gender=payload.gender.value if payload.gender is not None else None,
-        notes=payload.notes,
-        courtesy_name=payload.courtesy_name,
-        title=payload.title,
-        residence=payload.residence,
-        burial_place=payload.burial_place,
-        burial_latitude=payload.burial_latitude,
-        burial_longitude=payload.burial_longitude,
-    )
+    await _check_mother(db, payload.parent_id, payload.mother_id)
+
+    member = Member(tree_id=ctx.tree.id)
+    _assign(member, payload)
     db.add(member)
     await db.commit()
     await db.refresh(member)
@@ -267,18 +312,9 @@ async def update_member(
                 detail="cannot set parent to one of the member's own descendants",
             )
 
-    member.full_name = payload.full_name
-    member.parent_id = payload.parent_id
-    member.birth_year = payload.birth_year
-    member.death_year = payload.death_year
-    member.gender = payload.gender.value if payload.gender is not None else None
-    member.notes = payload.notes
-    member.courtesy_name = payload.courtesy_name
-    member.title = payload.title
-    member.residence = payload.residence
-    member.burial_place = payload.burial_place
-    member.burial_latitude = payload.burial_latitude
-    member.burial_longitude = payload.burial_longitude
+    await _check_mother(db, payload.parent_id, payload.mother_id)
+
+    _assign(member, payload)
     await db.commit()
     await db.refresh(member)
     return member
