@@ -157,7 +157,12 @@ imports.
   there is only one `DATABASE_URL` env var, not two.
 
 **Settings (`app/core/config.py`)** are read once via `get_settings()`
-(`@lru_cache`-wrapped) from `.env` / environment: `DATABASE_URL`,
+(`@lru_cache`-wrapped) from `.env` / environment: `DATABASE_URL` — or, when it
+is unset, `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_USER`/`POSTGRES_PASSWORD`/
+`POSTGRES_DB`, from which the URL is built with SQLAlchemy's `URL.create` so a
+password containing `@ : / # ?` is percent-encoded instead of corrupting the
+URL (the root `docker-compose.yml` uses this form; `DATABASE_URL` wins if both
+are given) —
 `JWT_SECRET`, `JWT_EXPIRE_MINUTES`, `FRONTEND_ORIGIN`, `COOKIE_SECURE`.
 Never hardcode these — this replaced a legacy Spring Boot backend that had
 a hardcoded JWT secret and a committed plaintext DB password, and that

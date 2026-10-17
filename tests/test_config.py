@@ -98,3 +98,69 @@ def test_settings_reads_smtp_from_env(monkeypatch):
     assert settings.smtp_password == "secret"
     assert settings.smtp_from == "no-reply@example.com"
     assert settings.smtp_use_tls is False
+
+
+def _clear_db_env(monkeypatch):
+    for var in ("DATABASE_URL", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("JWT_SECRET", "test-secret")
+
+
+def test_settings_builds_database_url_from_postgres_parts(monkeypatch):
+    from sqlalchemy.engine import make_url
+
+    _clear_db_env(monkeypatch)
+    monkeypatch.setenv("POSTGRES_HOST", "db")
+    monkeypatch.setenv("POSTGRES_USER", "genealogy")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "plain")
+    monkeypatch.setenv("POSTGRES_DB", "genealogy")
+
+    settings = Settings(_env_file=None)
+
+    url = make_url(settings.database_url)
+    assert url.drivername == "postgresql+asyncpg"
+    assert (url.host, url.port, url.username, url.password, url.database) == (
+        "db", 5432, "genealogy", "plain", "genealogy",
+    )
+
+
+def test_postgres_password_with_url_special_characters_round_trips(monkeypatch):
+    """A password like 'p@ss:w/rd#?%x' must not be parsed as part of the host."""
+    from sqlalchemy.engine import make_url
+
+    password = "p@ss:w/rd#?%x&=+ ü"
+    _clear_db_env(monkeypatch)
+    monkeypatch.setenv("POSTGRES_HOST", "db")
+    monkeypatch.setenv("POSTGRES_USER", "genealogy")
+    monkeypatch.setenv("POSTGRES_PASSWORD", password)
+    monkeypatch.setenv("POSTGRES_DB", "genealogy")
+
+    settings = Settings(_env_file=None)
+
+    for url_text in (settings.database_url, settings.database_url.replace("+asyncpg", "+psycopg2")):
+        url = make_url(url_text)
+        assert url.password == password
+        assert url.host == "db"
+        assert url.database == "genealogy"
+
+
+def test_database_url_wins_over_postgres_parts(monkeypatch):
+    _clear_db_env(monkeypatch)
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@elsewhere/other")
+    monkeypatch.setenv("POSTGRES_HOST", "db")
+    monkeypatch.setenv("POSTGRES_USER", "genealogy")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "plain")
+    monkeypatch.setenv("POSTGRES_DB", "genealogy")
+
+    assert Settings(_env_file=None).database_url == "postgresql+asyncpg://u:p@elsewhere/other"
+
+
+def test_missing_database_settings_is_a_clear_error(monkeypatch):
+    import pytest
+    from pydantic import ValidationError
+
+    _clear_db_env(monkeypatch)
+    monkeypatch.setenv("POSTGRES_HOST", "db")  # user/password/db missing
+
+    with pytest.raises(ValidationError, match="DATABASE_URL"):
+        Settings(_env_file=None)
