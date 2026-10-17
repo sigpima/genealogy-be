@@ -13,6 +13,8 @@ from app.routers.branches import router as branches_router
 from app.routers.calendar import router as calendar_router
 from app.routers.events import router as events_router
 from app.routers.generation_words import router as generation_words_router
+from app.routers.invitations import admin_router as invitations_admin_router
+from app.routers.invitations import public_router as invitations_public_router
 from app.routers.member import router as member_router
 from app.routers.media import router as media_router
 from app.routers.member_search import router as member_search_router
@@ -57,6 +59,8 @@ app.include_router(media_router)
 app.include_router(articles_router)
 app.include_router(timeline_router)
 app.include_router(generation_words_router)
+app.include_router(invitations_admin_router)
+app.include_router(invitations_public_router)
 app.include_router(trees_router)
 app.include_router(uploads_router)
 

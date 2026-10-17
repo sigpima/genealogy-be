@@ -16,6 +16,7 @@ from app.models import (  # noqa: E402,F401  (registers models on Base.metadata)
     branch,
     change_request,
     event,
+    event_card,
     marriage,
     media,
     member,

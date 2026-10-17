@@ -205,6 +205,17 @@ middle names (the word after the surname, names of 3+ words) and given names (la
 — and `completeness` (`have/total` for gender, birth year, birth day+month, hometown, residence, avatar, any photo). Aggregates only, so guests of a public
 tree may read it. `/members/table?missing=` gained `avatar`.
 
+**Invitation cards and RSVPs (GĐ9; design: `docs/superpowers/specs/2026-10-19-gd9-invitations-design.md`)** — `event_cards` = an invitation for ONE occurrence of an
+event (`date` must be an occurrence: `calendar_items.event_items([event], d, d)` non-empty, else 422), with a secret `token` (`secrets.token_urlsafe(24)`),
+`message`, `closes_on` and a manual `closed`; `event_rsvps` = one guest's answer (`response` NULL = invited, silent) with its own `invitee_token`. Admin routes
+(`/events/{id}/cards`, `/cards/{id}`, `/invitees`, `/responses/{id}`, `/export.csv`; admin-only, tree-scoped, audited as `card.*`) and **public routes
+(`app/routers/invitations.py::public_router`, `/invitations/{token}`) that need no login and no tree cookie — the token is the access control**. The public
+view returns the event, solar + lunar date, the chosen place's name/address/GPS, the message and **totals only (never other guests' names or notes)**; the
+open link's `respond` creates a guest (a name is required) and returns that guest's personal token, a personal link updates its own row and **keeps what the guest
+did not send again** (`model_fields_set`: an omitted note/party size survives, an explicit null clears the note). A closed card or a passed deadline
+(`calendar_items.vn_today()`, patchable in tests) is 409 for answers but still viewable; a card takes at most `MAX_RESPONSES` (500) answers. Unknown tokens are
+404. Deleting the event or the card removes the links.
+
 **Marriages (`app/models/marriage.py`)** let a member have one or more
 recorded spouses over time. A `Marriage` row is just `member_id` +
 `spouse_id` (both FK → `members.id`) + nullable `marriage_year` — a
