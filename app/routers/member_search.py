@@ -178,7 +178,15 @@ async def search_members(
     if tokens and not matches:
         scored = [(_closeness(folded_query, fold(p.member.full_name)), p) for p in candidates]
         close = sorted((s for s in scored if s[0] >= SUGGESTION_MIN_RATIO), key=lambda s: (-s[0], s[1].member.id))
-        suggestions = [_item(p, layout, branch_by_id) for _, p in close[:MAX_SUGGESTIONS]]
+        # Suggestions are about what to type, so one entry per distinct name (namesakes would only add noise).
+        seen: set[str] = set()
+        unique = []
+        for _, person in close:
+            key = fold(person.member.full_name)
+            if key not in seen:
+                seen.add(key)
+                unique.append(person)
+        suggestions = [_item(p, layout, branch_by_id) for p in unique[:MAX_SUGGESTIONS]]
 
     page = matches[offset : offset + limit]
     return SearchPage(total=len(matches), items=[_item(p, layout, branch_by_id) for p in page], suggestions=suggestions)

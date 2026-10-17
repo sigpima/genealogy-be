@@ -142,6 +142,13 @@ async def test_suggestions_appear_only_when_nothing_matches(people):
     assert nothing["items"] == [] and nothing["suggestions"] == []
 
 
+async def test_suggestions_list_each_name_once(people):
+    admin = people["admin"]
+    await add(admin, "Nguyễn Văn Hòa", people["to"])  # a namesake
+    body = (await admin.get("/members/search", params={"q": "Nguyen Van Hao"})).json()
+    assert [s["full_name"] for s in body["suggestions"]].count("Nguyễn Văn Hòa") == 1
+
+
 async def test_access_and_isolation(people, make_client, session, world):
     member = await signed_in(make_client, "member_a")
     assert (await member.get("/members/search", params={"q": "hoa"})).status_code == 200

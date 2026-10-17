@@ -114,6 +114,23 @@ or a spouse), `GET /members/export.csv` (UTF-8 + BOM) and `POST /members/import?
 without creates a child; blank cell = unchanged, `-` clears/resets a flag; **all-or-nothing** with a per-row 422 error list; cycle,
 duplicate-id, foreign-tree and mother checks happen in memory row by row; 5 MB / 10,000 rows).
 
+**Search, branches and stats (GĐ3; design: `docs/superpowers/specs/2026-10-18-gd3-search-branches-design.md`)** —
+`GET /members/search` (`app/routers/member_search.py`, registered before `member.router`) is a plain read that works on the
+tree **loaded in memory** (`app/core/tree_layout.py`: `TreeLayout`/`load_layout` give depth-first order, generation, deepest
+branch, spouses' partner), not SQL — no `unaccent`/`pg_trgm` extension is needed. `fold()` (`app/core/text.py`: NFD, drop
+combining marks, `đ→d`, lower, single spaces) is applied to both sides, so `hòa` = `hoà` = `hoa`; every query word must occur in
+the name, rank is exact > prefix > word-prefix > contains; spouses are searched only when `q` is given and report `spouse_of`;
+when a text query finds nothing, difflib-close names (≥ 0.6, one per distinct name) come back as `suggestions`. Filters:
+`generation`, `branch` (the head's whole subtree), `born_from/to`, `hometown`, `gender` (incl. `unknown`), `status`
+(same living/deceased/unknown rule as the web app: `member_status`). `GET /stats` (+ optional `branch`) gives counts per
+generation/gender/status/branch. **Branches** (`app/models/branch.py`, `app/routers/branches.py`): a branch = the subtree below
+`root_member_id` (UNIQUE: a person heads at most one, 409; `ON DELETE CASCADE` so deleting a childless head removes its branch);
+a member's branch is the **deepest** head among themselves and their ancestors — nothing is stored per member
+(`deepest_branch` for one member, `TreeLayout.branch_of` for the whole tree; spouses take their partner's). `GET /branches` is a
+read (counts = whole subtree, sub-branches included), writes are admin-only, another tree's head/branch is 404;
+`MemberDetail.branch` carries `{id, name, color}`. Revisit the in-memory approach (add a SQL index) only if a tree passes
+~10,000 people.
+
 **Marriages (`app/models/marriage.py`)** let a member have one or more
 recorded spouses over time. A `Marriage` row is just `member_id` +
 `spouse_id` (both FK → `members.id`) + nullable `marriage_year` — a
