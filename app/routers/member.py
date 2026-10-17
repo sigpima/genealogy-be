@@ -136,9 +136,11 @@ async def _is_descendant(db: AsyncSession, ancestor_id: int, candidate_id: int) 
 
 @router.get("/tree", response_model=MemberSkeletonNode | None)
 async def get_tree(db: AsyncSession = Depends(get_db)) -> MemberSkeletonNode | None:
-    members_result = await db.execute(select(Member))
+    # ORDER BY id: without it Postgres returns an UPDATEd row after the others, so siblings would
+    # reshuffle every time one of them is edited. Creation order is the stable, expected order.
+    members_result = await db.execute(select(Member).order_by(Member.id))
     members = list(members_result.scalars().all())
-    marriages_result = await db.execute(select(Marriage))
+    marriages_result = await db.execute(select(Marriage).order_by(Marriage.id))
     marriages = list(marriages_result.scalars().all())
     full_tree = _build_tree(members, marriages)
     return _to_skeleton(full_tree) if full_tree is not None else None
@@ -150,7 +152,9 @@ async def get_member_detail(member_id: int, db: AsyncSession = Depends(get_db)) 
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
 
-    marriages_result = await db.execute(select(Marriage).where(Marriage.member_id == member_id))
+    marriages_result = await db.execute(
+        select(Marriage).where(Marriage.member_id == member_id).order_by(Marriage.id)
+    )
     marriages = list(marriages_result.scalars().all())
     spouses = []
     for marriage in marriages:

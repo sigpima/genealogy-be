@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Install/sync dependencies: `uv sync`
 - Run the dev server: `uv run uvicorn app.main:app --reload`
-- Run all tests: `uv run pytest`
+- Run all tests (needs `docker compose up -d --wait db-test` first): `uv run pytest`
 - Run a single test file: `uv run pytest tests/test_auth.py -v`
 - Run a single test: `uv run pytest tests/test_auth.py::test_login_rejects_wrong_password -v`
 - Apply migrations: `uv run alembic upgrade head`
@@ -15,7 +15,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This project uses `uv`, not bare `pip`/`venv` — always prefix Python commands with `uv run`.
 
-**Running against a real Postgres for testing:** unit tests never need one (SQLite), but to exercise migrations and the real API start a throwaway container, e.g. `docker run -d --rm --name gia-pha-smoke-pg -e POSTGRES_PASSWORD=smoke -e POSTGRES_DB=genealogy_smoke -p 127.0.0.1:55432:5432 postgres:16-alpine`, and point `DATABASE_URL=postgresql+asyncpg://postgres:smoke@127.0.0.1:55432/genealogy_smoke` at it (env vars override `.env`). Never point test runs at the developer's own `genealogy` database.
+**Tests need a Postgres, never SQLite.** Start the throwaway test database first:
+`docker compose up -d --wait db-test` (see `docker-compose.yml`; it listens on
+`127.0.0.1:55432`, data lives on tmpfs, and `docker compose down` discards it). Dev
+database: `docker compose up -d --wait db` (`127.0.0.1:15432`, volume `postgres_data`).
+Neither uses 5432, which is often taken by a Postgres installed on the host. Never point
+test runs at a developer's own database — `tests/conftest.py` refuses any database whose
+name does not end in `_test`.
 
 **Docker:** `Dockerfile` here builds a standalone production image (multi-stage,
 `uv`-installed venv copied into a slim runtime image); its `CMD` runs `alembic
@@ -124,7 +130,7 @@ writing into the repo's real `uploads/` folder (which is gitignored).
 line**, not just creating the model file — `target_metadata = Base.metadata`
 only knows about models that have actually been imported somewhere, and
 `env.py`'s `from app.models import member, user` is what does that for
-Alembic specifically (see the `Base.metadata.create_all` gotcha below,
+Alembic specifically (see the import-order gotcha below,
 which is the same underlying issue). Forgetting this makes
 `alembic revision --autogenerate` silently generate an **empty**
 migration instead of erroring — always open the generated file and
@@ -201,24 +207,20 @@ round-trip doesn't block the event loop. `POST /auth/reset-password`
 redeems a token exactly once (`used_at` is set the moment the password
 changes) and rejects unknown, expired, or already-used tokens with
 `400`. **`expires_at`/`used_at` are naive UTC `DateTime` columns, not
-`DateTime(timezone=True)`** — SQLite (used by every test via the
-`client` fixture) silently drops tzinfo on round-trip, which would make
-comparing against `datetime.now(timezone.utc)` raise `TypeError: can't
-compare offset-naive and offset-aware datetimes` in tests while working
-fine on real Postgres; staying naive-UTC end-to-end throughout
-`_utcnow()`, the model, and every comparison sidesteps that dialect
-mismatch entirely. Tests never send real email — they monkeypatch
+`DateTime(timezone=True)`** — a leftover from when the tests ran on SQLite, which
+silently drops tzinfo on round-trip (comparing against `datetime.now(timezone.utc)`
+raised `TypeError`). The suite now runs on Postgres where either would work, but the
+columns and `_utcnow()` stay naive-UTC end to end because changing them needs a
+migration for no gain; keep every comparison naive-UTC. Tests never send real email — they monkeypatch
 `app.routers.auth.send_password_reset_email` directly (see
 `tests/test_password_reset.py`); the one test that exercises
 `app/core/email.py` itself monkeypatches `smtplib.SMTP`.
 
-**Import-order gotcha for SQLAlchemy metadata:** `Base.metadata.create_all`
-(used in test fixtures, see `tests/conftest.py` and `tests/test_user_model.py`)
-only creates tables for models that have already been imported somewhere —
-SQLAlchemy registers a model on `Base.metadata` at class-definition time.
-Fixtures that call `create_all` import the relevant model module (or
-`app.main`, which transitively imports all routers/models) *before* calling
-it, not after.
+**Import-order gotcha for SQLAlchemy metadata:** `Base.metadata` only knows
+about models that have already been imported — SQLAlchemy registers a model at
+class-definition time. The test schema is built by running the real Alembic
+migrations (not `create_all`), so this matters for `alembic/env.py`'s import line
+(see above); fixtures that touch ORM classes import them inside the test body.
 
 **Global error handling:** `app/main.py` registers a catch-all
 `@app.exception_handler(Exception)` that returns a generic 500 JSON body
@@ -228,19 +230,26 @@ directly.
 
 ## Testing
 
-Tests never touch a real Postgres — `tests/conftest.py`'s `client` fixture
-overrides the `get_db` FastAPI dependency with a fresh in-memory SQLite
-(`sqlite+aiosqlite:///:memory:`) engine per test, and the `_env` fixture
-(autouse) points `DATABASE_URL` at SQLite for the duration of the test.
-`asyncio_mode = "auto"` is set in `pyproject.toml`, so async test functions
-and fixtures don't need `@pytest.mark.asyncio`.
+Tests run against a real Postgres (the `db-test` service of `docker-compose.yml`, same
+major version as the deploy). `tests/conftest.py`:
+- `_database` (session scope, autouse) refuses a database not named `*_test`, drops and
+  recreates the `public` schema, then runs `alembic upgrade head` **in a subprocess**
+  (keeps alembic's logging config out of pytest) — so migrations are tested too, and the
+  suite fails fast with instructions if the container isn't running. Override the target
+  with `TEST_DATABASE_URL`.
+- `_clean_tables` (autouse) runs `TRUNCATE ... RESTART IDENTITY CASCADE` on every table
+  before each test, so ids start at 1 and tests are independent.
+- `engine`/`session`/`client` use `NullPool`: asyncpg connections are bound to the event
+  loop and pytest-asyncio gives each test its own loop, so connections can't be pooled
+  across tests. `client` overrides `get_db` with sessions from that engine.
+- `_env` (autouse) points `DATABASE_URL` at the test database and `UPLOAD_DIR` at a
+  per-test `tmp_path` (also exposed as the `upload_dir` fixture), so tests never write
+  into the repo's `uploads/`.
 
-**SQLite does not enforce foreign keys by default** — `tests/conftest.py`'s
-`client` fixture registers a `connect` event listener that runs
-`PRAGMA foreign_keys=ON` on every new connection. Without it, tests
-relying on FK-triggered behavior (e.g. `Member` delete-with-children
-returning 409 via `IntegrityError`) would silently pass for the wrong
-reason: SQLite would just allow the delete, and the code path that
-catches `IntegrityError` would never actually run. Any new test fixture
-that spins up its own SQLite engine and exercises FK-dependent behavior
-needs the same event listener.
+`asyncio_mode = "auto"` is set in `pyproject.toml`, so async test functions and fixtures
+don't need `@pytest.mark.asyncio`. Foreign keys are enforced for real (no SQLite pragma
+needed). Moving off SQLite already caught one real bug: `GET /members/tree` had no
+`ORDER BY`, so Postgres reshuffled siblings after an edit (`tests/test_member_order.py`)
+— keep list queries ordered.
+
+`GET /health` (public, no DB access) is the container healthcheck target.

@@ -29,6 +29,12 @@ app.include_router(auth_router)
 app.include_router(member_router)
 
 
+@app.get("/health")
+async def health() -> dict[str, str]:
+    """Liveness probe for container healthchecks (public, no DB access on purpose)."""
+    return {"status": "ok"}
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=500, content={"detail": "internal server error"})
