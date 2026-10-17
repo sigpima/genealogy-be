@@ -1,10 +1,10 @@
 from sqlalchemy import select
 
 
-async def test_create_root_member(session):
+async def test_create_root_member(session, tree):
     from app.models.member import Member
 
-    root = Member(full_name="Root")
+    root = Member(tree_id=tree.id, full_name="Root")
     session.add(root)
     await session.commit()
     await session.refresh(root)
@@ -14,15 +14,15 @@ async def test_create_root_member(session):
     assert root.created_at is not None
 
 
-async def test_create_child_member(session):
+async def test_create_child_member(session, tree):
     from app.models.member import Member
 
-    root = Member(full_name="Root")
+    root = Member(tree_id=tree.id, full_name="Root")
     session.add(root)
     await session.commit()
     await session.refresh(root)
 
-    child = Member(full_name="Child", parent_id=root.id)
+    child = Member(tree_id=tree.id, full_name="Child", parent_id=root.id)
     session.add(child)
     await session.commit()
 
@@ -31,10 +31,10 @@ async def test_create_child_member(session):
     assert fetched.parent_id == root.id
 
 
-async def test_create_member_with_details(session):
+async def test_create_member_with_details(session, tree):
     from app.models.member import Member
 
-    member = Member(
+    member = Member(tree_id=tree.id, 
         full_name="Detailed",
         birth_year=1950,
         death_year=2010,
@@ -51,10 +51,10 @@ async def test_create_member_with_details(session):
     assert member.notes == "Some notes"
 
 
-async def test_create_member_without_details_defaults_to_none(session):
+async def test_create_member_without_details_defaults_to_none(session, tree):
     from app.models.member import Member
 
-    member = Member(full_name="Minimal")
+    member = Member(tree_id=tree.id, full_name="Minimal")
     session.add(member)
     await session.commit()
     await session.refresh(member)
@@ -65,10 +65,10 @@ async def test_create_member_without_details_defaults_to_none(session):
     assert member.notes is None
 
 
-async def test_create_member_without_avatar_defaults_to_none(session):
+async def test_create_member_without_avatar_defaults_to_none(session, tree):
     from app.models.member import Member
 
-    member = Member(full_name="No Avatar")
+    member = Member(tree_id=tree.id, full_name="No Avatar")
     session.add(member)
     await session.commit()
     await session.refresh(member)

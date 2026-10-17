@@ -2,39 +2,53 @@
 
 - `get_current_user` (routers/auth.py): any *active* signed-in user (401 without a valid token,
   403 when the account is pending/disabled).
-- `require_admin`: an active admin.
-- `get_viewer`: who may *read*: an active user, or `None` (a guest) when the site is public.
+- `get_read_context`: who may *read* and which tree: an active user (their tree), or a guest when
+  the tree is public.
+- `get_write_context`: an admin/superadmin and the tree they act on.
 """
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.roles import ROLE_ADMIN, get_site_settings
+from app.core.roles import ADMIN_ROLES, get_tree_settings
+from app.core.tenancy import TreeContext, public_tree, tree_for_user
 from app.db.session import get_db
 from app.models.user import User
 from app.routers.auth import ACCESS_TOKEN_COOKIE, get_current_user, get_token_from_request
 
 
 async def require_admin(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.role != ROLE_ADMIN:
+    if current_user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin only")
     return current_user
 
 
-async def get_viewer(request: Request, db: AsyncSession = Depends(get_db)) -> User | None:
-    site_is_public = (await get_site_settings(db))["visibility"] == "public"
+async def get_write_context(
+    request: Request, db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin)
+) -> TreeContext:
+    return TreeContext(tree=await tree_for_user(admin, request, db), user=admin)
+
+
+async def get_read_context(request: Request, db: AsyncSession = Depends(get_db)) -> TreeContext:
     has_credentials = bool(
         request.cookies.get(ACCESS_TOKEN_COOKIE) or request.headers.get("Authorization")
     )
     if has_credentials:
         try:
-            return await get_current_user(get_token_from_request(request), db)
+            user = await get_current_user(get_token_from_request(request), db)
+            return TreeContext(tree=await tree_for_user(user, request, db), user=user)
         except HTTPException as exc:
-            # A bad/expired token must not lock a guest out of a public site, but a real account
-            # that is pending/disabled (403) stays refused.
-            if exc.status_code == status.HTTP_401_UNAUTHORIZED and site_is_public:
-                return None
-            raise
-    if site_is_public:
-        return None
-    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not authenticated")
+            # A bad/expired token degrades to "guest" (it may still read a public tree); a real
+            # pending/disabled account (403) or a tree error stays as it is.
+            if exc.status_code != status.HTTP_401_UNAUTHORIZED:
+                raise
+    # Guest: only a public tree may be read. Anything unresolvable is a plain 401 so the frontend
+    # sends the visitor to the login page.
+    unauthenticated = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not authenticated")
+    try:
+        tree = await public_tree(request, db)
+    except HTTPException:
+        raise unauthenticated
+    if (await get_tree_settings(db, tree.id))["visibility"] != "public":
+        raise unauthenticated
+    return TreeContext(tree=tree, user=None)

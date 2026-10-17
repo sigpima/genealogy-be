@@ -202,27 +202,38 @@ Note the pinned versions in `pyproject.toml`: `passlib==1.7.4` +
 `bcrypt==4.0.1` — bcrypt >=4.1 removed an attribute passlib 1.7.4 reads,
 so don't bump `bcrypt` alone without also moving off passlib.
 
-**Roles, account status and site settings (design: `docs/superpowers/specs/2026-10-17-roles-and-admin-design.md`)** —
-`users.role` is `admin` | `member`, `users.status` is `pending` | `active` | `disabled`
-(constants and the site-setting defaults live in `app/core/roles.py`). **The first
-registration while the `users` table is empty becomes the active admin** whatever the
-registration mode (a fresh install must be usable); later ones follow
-`site_settings.registration`: `open` (active at once), `approval` (default: `pending` until
-an admin approves) or `closed` (403). `login` answers 403 `account_pending` / `account_disabled`,
-and **`get_current_user` re-checks `status` on every request** (403), so disabling an account
-kills its still-valid token immediately. Access rules are in `app/core/permissions.py`:
-`require_admin`, and `get_viewer` for reads — an active user, or `None` (guest) when
-`site_settings.visibility` is `public` (an invalid/expired token degrades to guest on a public
-site; a real pending/disabled account stays refused). In `app/routers/member.py` **every write
-route carries `dependencies=ADMIN_ONLY`** — a new write route that forgets it would be open to
-members, so `tests/test_roles_admin.py::test_members_can_read_but_not_write` lists them; add the
-new route there. Guests get a **redacted** `MemberDetail` (no `notes`, `residence`, `burial_*`);
-`/uploads/*` (avatars) is still served statically without auth (random UUID file names only) —
-tighten this before relying on private mode for photos. Admin endpoints (`app/routers/admin.py`):
-`GET/POST /admin/users`, `PATCH /admin/users/{id}` (role/status; the **last active admin can never
-be demoted or disabled**, 409), `GET/PUT /admin/settings`; `GET /site/info` is public. The
-migration turns every pre-existing user into an active admin. Tests that need several people at
-once use the `make_client` fixture (independent cookie jars).
+**Multi-family trees, roles and account status (designs: `docs/superpowers/specs/2026-10-17-roles-and-admin-design.md`
+and `...-multi-tree-design.md`)** — one deployment hosts many families. `trees(id, name, slug)`;
+`members.tree_id` is NOT NULL; `users.tree_id` is NULL **only for superadmins**; `site_settings` is per
+tree (PK `(tree_id, key)`: `visibility` private/public, `registration` open/approval/closed). Roles:
+`superadmin` (platform owner, no tree, acts in any tree), `admin` (one tree), `member` (reads one
+tree); statuses `pending` | `active` | `disabled`. Constants and setting defaults: `app/core/roles.py`.
+**Which tree a request acts on** (`app/core/tenancy.py`): a signed-in user → their own `tree_id`
+(nothing the client sends can change that); a superadmin → `X-Tree-Id` header, else the lowest-id
+tree; a guest / signup → the `tree_slug` cookie (set by the web app's `/t/<slug>` route), else the
+only tree if there is exactly one. **Cross-tree ids always answer 404 (never 403), for reads and
+writes alike** — keep it that way (`_member_in_tree` in `app/routers/member.py`; the admin router's
+`_user_in_tree`). Every member route takes `get_read_context` (an active user, or a guest on a
+public tree; guests with no resolvable tree get a plain 401 so the web app sends them to /login) or
+`get_write_context` (admin/superadmin) from `app/core/permissions.py`; a new write route that
+forgets the latter would be open to members, and `tests/test_multi_tree.py` /
+`tests/test_roles_admin.py::test_members_can_read_but_not_write` are where to add it. **Bootstrap:**
+the first registration while `users` is empty becomes the tree-less *superadmin* and a default tree
+is created if none exists; everybody else joins the resolved tree as a `member` under *that tree's*
+registration mode (400 when several trees exist and no cookie says which; 403 when closed).
+`login` answers 403 `account_pending` / `account_disabled`, and `get_current_user` re-checks `status`
+on every request, so disabling an account kills its token at once. Guests get a **redacted**
+`MemberDetail` (no `notes`, `residence`, `burial_*`); `/uploads/*` (avatars) is still served
+statically without auth (random UUID names only) — tighten before relying on private mode for photos.
+Admin endpoints (`app/routers/admin.py`) act on the resolved tree only: `GET/POST /admin/users`,
+`PATCH /admin/users/{id}` (role admin/member and status; **the last active admin of a tree can never be
+demoted or disabled**, 409; superadmins are invisible to tree admins and `superadmin` can't be granted
+here), `GET/PUT /admin/settings`; `GET /site/info` (public) describes the visitor's tree. Superadmin
+web UI does not exist yet — **`scripts/manage.py`** (`app/cli.py`; `create-tree`, `rename-tree`,
+`create-user` incl. superadmin, `set-role`, `list`) stands in for it, and `scripts/seed_members.py`
+takes `--tree-slug`. The migrations turn every pre-existing user into an admin and move all existing
+data into one `default` tree. Tests that need several people at once use the `make_client` fixture
+(independent cookie jars); `tree` makes a tree for ORM-level tests.
 
 **Forgot password (`app/routers/auth.py`):** `POST /auth/forgot-password`
 **always returns the same `200` body regardless of whether the email is

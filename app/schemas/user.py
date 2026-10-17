@@ -17,4 +17,6 @@ class UserRead(BaseModel):
     full_name: str
     role: str
     status: str
+    tree_id: int | None = None
+    tree_name: str | None = None
     created_at: datetime

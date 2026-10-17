@@ -13,13 +13,16 @@ async def login(client, email, password=PASSWORD):
     return await client.post("/auth/login", json={"email": email, "password": password})
 
 
-async def set_setting(session, key, value):
+async def set_setting(session, key, value, tree_id=None):
+    """Set a per-tree site setting; by default on the lowest-id tree (the default tree)."""
+    if tree_id is None:
+        tree_id = (await session.execute(text("SELECT MIN(id) FROM trees"))).scalar_one()
     await session.execute(
         text(
-            "INSERT INTO site_settings (key, value) VALUES (:k, :v) "
-            "ON CONFLICT (key) DO UPDATE SET value = :v"
+            "INSERT INTO site_settings (tree_id, key, value) VALUES (:t, :k, :v) "
+            "ON CONFLICT (tree_id, key) DO UPDATE SET value = :v"
         ),
-        {"k": key, "v": value},
+        {"t": tree_id, "k": key, "v": value},
     )
     await session.commit()
 
@@ -32,10 +35,10 @@ async def set_user(session, email, **columns):
     await session.commit()
 
 
-async def test_first_registered_user_becomes_active_admin(client):
+async def test_first_registered_user_becomes_active_superadmin(client):
     response = await register(client, "first@example.com")
     assert response.status_code == 201
-    assert response.json()["role"] == "admin"
+    assert response.json()["role"] == "superadmin"
     assert response.json()["status"] == "active"
 
 
@@ -54,8 +57,8 @@ async def test_registration_open_activates_new_members_at_once(client, session):
     assert (response.json()["role"], response.json()["status"]) == ("member", "active")
 
 
-async def test_registration_closed_is_refused_but_the_very_first_user_can_still_bootstrap(client, session):
-    await set_setting(session, "registration", "closed")
+async def test_registration_closed_is_refused_but_the_very_first_user_can_still_bootstrap(client, session, tree):
+    await set_setting(session, "registration", "closed", tree.id)
     assert (await register(client, "first@example.com")).status_code == 201
     refused = await register(client, "second@example.com")
     assert refused.status_code == 403
@@ -95,4 +98,4 @@ async def test_me_returns_role_and_status(client):
     await register(client, "first@example.com")
     await login(client, "first@example.com")
     body = (await client.get("/auth/me")).json()
-    assert (body["role"], body["status"]) == ("admin", "active")
+    assert (body["role"], body["status"]) == ("superadmin", "active")

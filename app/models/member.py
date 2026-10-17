@@ -11,6 +11,7 @@ class Member(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    tree_id: Mapped[int] = mapped_column(ForeignKey("trees.id"), index=True, nullable=False)
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("members.id"), nullable=True)
     birth_year: Mapped[int | None] = mapped_column(nullable=True)
     death_year: Mapped[int | None] = mapped_column(nullable=True)

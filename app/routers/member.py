@@ -10,8 +10,8 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.marriage import Marriage
 from app.models.member import Member
-from app.core.permissions import get_viewer, require_admin
-from app.models.user import User
+from app.core.permissions import get_read_context, get_write_context
+from app.core.tenancy import TreeContext
 from app.schemas.member import (
     MarriageCreate,
     MarriageUpdate,
@@ -31,10 +31,12 @@ ALLOWED_AVATAR_CONTENT_TYPES = {
 }
 MAX_AVATAR_SIZE = 5 * 1024 * 1024
 
-# Reads need an active user (or nobody at all when the site is public: see get_viewer); every write is
-# admin-only (require_admin on each write route below).
+# Every route acts on ONE tree (see app/core/tenancy.py) and never touches another: a member id from
+# another tree answers 404, exactly like an id that does not exist. Reads take `get_read_context`
+# (an active user, or a guest on a public tree); every write takes `get_write_context` (an admin or
+# superadmin) - a new write route that forgets it would be open to members, so tests/test_roles_admin.py
+# ::test_members_can_read_but_not_write lists them.
 router = APIRouter(prefix="/members", tags=["members"])
-ADMIN_ONLY = [Depends(require_admin)]
 
 
 def _delete_avatar_file(upload_dir: str, avatar_url: str | None) -> None:
@@ -125,6 +127,11 @@ def _sibling_rank(member: Member, siblings: list[Member]) -> str | None:
     return f"Thứ {suffix}"
 
 
+async def _member_in_tree(db: AsyncSession, tree_id: int, member_id: int) -> Member | None:
+    member = await db.get(Member, member_id)
+    return member if member is not None and member.tree_id == tree_id else None
+
+
 async def _is_descendant(db: AsyncSession, ancestor_id: int, candidate_id: int) -> bool:
     """True if candidate_id is currently a descendant of ancestor_id."""
     current_id: int | None = candidate_id
@@ -138,13 +145,18 @@ async def _is_descendant(db: AsyncSession, ancestor_id: int, candidate_id: int) 
 
 @router.get("/tree", response_model=MemberSkeletonNode | None)
 async def get_tree(
-    db: AsyncSession = Depends(get_db), viewer: User | None = Depends(get_viewer)
+    db: AsyncSession = Depends(get_db), ctx: TreeContext = Depends(get_read_context)
 ) -> MemberSkeletonNode | None:
     # ORDER BY id: without it Postgres returns an UPDATEd row after the others, so siblings would
     # reshuffle every time one of them is edited. Creation order is the stable, expected order.
-    members_result = await db.execute(select(Member).order_by(Member.id))
+    members_result = await db.execute(
+        select(Member).where(Member.tree_id == ctx.tree.id).order_by(Member.id)
+    )
     members = list(members_result.scalars().all())
-    marriages_result = await db.execute(select(Marriage).order_by(Marriage.id))
+    member_ids = [member.id for member in members]
+    marriages_result = await db.execute(
+        select(Marriage).where(Marriage.member_id.in_(member_ids)).order_by(Marriage.id)
+    )
     marriages = list(marriages_result.scalars().all())
     full_tree = _build_tree(members, marriages)
     return _to_skeleton(full_tree) if full_tree is not None else None
@@ -154,9 +166,9 @@ async def get_tree(
 async def get_member_detail(
     member_id: int,
     db: AsyncSession = Depends(get_db),
-    viewer: User | None = Depends(get_viewer),
+    ctx: TreeContext = Depends(get_read_context),
 ) -> MemberDetail:
-    member = await db.get(Member, member_id)
+    member = await _member_in_tree(db, ctx.tree.id, member_id)
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
 
@@ -172,7 +184,9 @@ async def get_member_detail(
 
     sibling_rank = None
     if member.parent_id is not None:
-        siblings_result = await db.execute(select(Member).where(Member.parent_id == member.parent_id))
+        siblings_result = await db.execute(
+            select(Member).where(Member.tree_id == ctx.tree.id, Member.parent_id == member.parent_id)
+        )
         sibling_rank = _sibling_rank(member, list(siblings_result.scalars().all()))
 
     detail = MemberDetail(
@@ -186,7 +200,7 @@ async def get_member_detail(
         sibling_rank=sibling_rank,
         spouses=spouses,
     )
-    if viewer is not None:  # guests (public site) only get the fields above
+    if ctx.user is not None:  # guests (public tree) only get the fields above
         detail.notes = member.notes
         detail.residence = member.residence
         detail.burial_place = member.burial_place
@@ -195,14 +209,19 @@ async def get_member_detail(
     return detail
 
 
-@router.post("", dependencies=ADMIN_ONLY, response_model=MemberRead, status_code=status.HTTP_201_CREATED)
-async def create_member(payload: MemberCreate, db: AsyncSession = Depends(get_db)) -> Member:
+@router.post("", response_model=MemberRead, status_code=status.HTTP_201_CREATED)
+async def create_member(
+    payload: MemberCreate,
+    db: AsyncSession = Depends(get_db),
+    ctx: TreeContext = Depends(get_write_context),
+) -> Member:
     if payload.parent_id is not None:
-        parent = await db.get(Member, payload.parent_id)
+        parent = await _member_in_tree(db, ctx.tree.id, payload.parent_id)
         if parent is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="parent not found")
 
     member = Member(
+        tree_id=ctx.tree.id,
         full_name=payload.full_name,
         parent_id=payload.parent_id,
         birth_year=payload.birth_year,
@@ -222,11 +241,14 @@ async def create_member(payload: MemberCreate, db: AsyncSession = Depends(get_db
     return member
 
 
-@router.put("/{member_id}", dependencies=ADMIN_ONLY, response_model=MemberRead)
+@router.put("/{member_id}", response_model=MemberRead)
 async def update_member(
-    member_id: int, payload: MemberUpdate, db: AsyncSession = Depends(get_db)
+    member_id: int,
+    payload: MemberUpdate,
+    db: AsyncSession = Depends(get_db),
+    ctx: TreeContext = Depends(get_write_context),
 ) -> Member:
-    member = await db.get(Member, member_id)
+    member = await _member_in_tree(db, ctx.tree.id, member_id)
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
 
@@ -236,7 +258,7 @@ async def update_member(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="a member cannot be its own parent",
             )
-        new_parent = await db.get(Member, payload.parent_id)
+        new_parent = await _member_in_tree(db, ctx.tree.id, payload.parent_id)
         if new_parent is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="parent not found")
         if await _is_descendant(db, member_id, payload.parent_id):
@@ -262,9 +284,13 @@ async def update_member(
     return member
 
 
-@router.delete("/{member_id}", dependencies=ADMIN_ONLY, status_code=status.HTTP_204_NO_CONTENT)
-async def delete_member(member_id: int, db: AsyncSession = Depends(get_db)) -> None:
-    member = await db.get(Member, member_id)
+@router.delete("/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_member(
+    member_id: int,
+    db: AsyncSession = Depends(get_db),
+    ctx: TreeContext = Depends(get_write_context),
+) -> None:
+    member = await _member_in_tree(db, ctx.tree.id, member_id)
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
 
@@ -280,17 +306,20 @@ async def delete_member(member_id: int, db: AsyncSession = Depends(get_db)) -> N
 
 
 @router.post(
-    "/{member_id}/marriages",
-    dependencies=ADMIN_ONLY, response_model=SpouseInfo, status_code=status.HTTP_201_CREATED
+    "/{member_id}/marriages", response_model=SpouseInfo, status_code=status.HTTP_201_CREATED
 )
 async def create_marriage(
-    member_id: int, payload: MarriageCreate, db: AsyncSession = Depends(get_db)
+    member_id: int,
+    payload: MarriageCreate,
+    db: AsyncSession = Depends(get_db),
+    ctx: TreeContext = Depends(get_write_context),
 ) -> SpouseInfo:
-    member = await db.get(Member, member_id)
+    member = await _member_in_tree(db, ctx.tree.id, member_id)
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
 
     spouse = Member(
+        tree_id=ctx.tree.id,
         full_name=payload.spouse_full_name,
         parent_id=None,
         birth_year=payload.spouse_birth_year,
@@ -309,12 +338,15 @@ async def create_marriage(
     return _spouse_info(marriage, spouse)
 
 
-@router.put("/marriages/{marriage_id}", dependencies=ADMIN_ONLY, response_model=SpouseInfo)
+@router.put("/marriages/{marriage_id}", response_model=SpouseInfo)
 async def update_marriage(
-    marriage_id: int, payload: MarriageUpdate, db: AsyncSession = Depends(get_db)
+    marriage_id: int,
+    payload: MarriageUpdate,
+    db: AsyncSession = Depends(get_db),
+    ctx: TreeContext = Depends(get_write_context),
 ) -> SpouseInfo:
     marriage = await db.get(Marriage, marriage_id)
-    if marriage is None:
+    if marriage is None or await _member_in_tree(db, ctx.tree.id, marriage.member_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="marriage not found")
 
     spouse = await db.get(Member, marriage.spouse_id)
@@ -330,11 +362,14 @@ async def update_marriage(
     return _spouse_info(marriage, spouse)
 
 
-@router.post("/{member_id}/avatar", dependencies=ADMIN_ONLY)
+@router.post("/{member_id}/avatar")
 async def upload_avatar(
-    member_id: int, file: UploadFile = File(...), db: AsyncSession = Depends(get_db)
+    member_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    ctx: TreeContext = Depends(get_write_context),
 ) -> dict[str, str]:
-    member = await db.get(Member, member_id)
+    member = await _member_in_tree(db, ctx.tree.id, member_id)
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
 
@@ -362,9 +397,13 @@ async def upload_avatar(
     return {"avatar_url": avatar_url}
 
 
-@router.delete("/{member_id}/avatar", dependencies=ADMIN_ONLY, status_code=status.HTTP_204_NO_CONTENT)
-async def delete_avatar(member_id: int, db: AsyncSession = Depends(get_db)) -> None:
-    member = await db.get(Member, member_id)
+@router.delete("/{member_id}/avatar", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_avatar(
+    member_id: int,
+    db: AsyncSession = Depends(get_db),
+    ctx: TreeContext = Depends(get_write_context),
+) -> None:
+    member = await _member_in_tree(db, ctx.tree.id, member_id)
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
 

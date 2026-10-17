@@ -10,13 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.email import send_password_reset_email
 from app.core.roles import (
-    ROLE_ADMIN,
     ROLE_MEMBER,
+    ROLE_SUPERADMIN,
     STATUS_ACTIVE,
     STATUS_DISABLED,
     STATUS_PENDING,
-    get_site_settings,
+    get_tree_settings,
 )
+from app.core.tenancy import public_tree
+from app.core.tenants import get_or_create_default_tree
 from app.core.security import (
     InvalidTokenError,
     create_access_token,
@@ -26,6 +28,7 @@ from app.core.security import (
 )
 from app.db.session import get_db
 from app.models.password_reset_token import PasswordResetToken
+from app.models.tree import Tree
 from app.models.user import User
 from app.schemas.auth import (
     ForgotPasswordRequest,
@@ -63,7 +66,9 @@ def get_token_from_request(request: Request) -> str:
 
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)) -> User:
+async def register(
+    payload: UserCreate, request: Request, db: AsyncSession = Depends(get_db)
+) -> UserRead:
     existing = await db.execute(select(User).where(User.email == payload.email))
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(
@@ -71,12 +76,16 @@ async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)) -> U
         )
 
     # A fresh install must be usable: while there are no users at all, the first registration
-    # becomes the active admin whatever the registration mode is.
+    # becomes the (tree-less) superadmin and a default tree is created if there is none yet.
     user_count = (await db.execute(select(func.count()).select_from(User))).scalar_one()
+    tree: Tree | None = None
     if user_count == 0:
-        role, account_status = ROLE_ADMIN, STATUS_ACTIVE
+        await get_or_create_default_tree(db)
+        role, account_status = ROLE_SUPERADMIN, STATUS_ACTIVE
     else:
-        mode = (await get_site_settings(db))["registration"]
+        # Everybody else joins the tree they refer to (cookie, or the only tree), under THAT tree's rules.
+        tree = await public_tree(request, db, ambiguous_status=status.HTTP_400_BAD_REQUEST)
+        mode = (await get_tree_settings(db, tree.id))["registration"]
         if mode == "closed":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="registration is closed"
@@ -90,11 +99,14 @@ async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)) -> U
         full_name=payload.full_name,
         role=role,
         status=account_status,
+        tree_id=tree.id if tree else None,
     )
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    return user
+    read = UserRead.model_validate(user)
+    read.tree_name = tree.name if tree else None
+    return read
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -153,8 +165,14 @@ async def get_current_user(
 
 
 @router.get("/me", response_model=UserRead)
-async def read_current_user(current_user: User = Depends(get_current_user)) -> User:
-    return current_user
+async def read_current_user(
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> UserRead:
+    read = UserRead.model_validate(current_user)
+    if current_user.tree_id is not None:
+        tree = await db.get(Tree, current_user.tree_id)
+        read.tree_name = tree.name if tree else None
+    return read
 
 
 @router.post("/forgot-password")

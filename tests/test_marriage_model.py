@@ -1,12 +1,12 @@
 from sqlalchemy import select
 
 
-async def test_create_marriage(session):
+async def test_create_marriage(session, tree):
     from app.models.marriage import Marriage
     from app.models.member import Member
 
-    husband = Member(full_name="Husband")
-    wife = Member(full_name="Wife")
+    husband = Member(tree_id=tree.id, full_name="Husband")
+    wife = Member(tree_id=tree.id, full_name="Wife")
     session.add_all([husband, wife])
     await session.commit()
     await session.refresh(husband)
@@ -23,12 +23,12 @@ async def test_create_marriage(session):
     assert fetched.created_at is not None
 
 
-async def test_create_marriage_without_year_defaults_to_none(session):
+async def test_create_marriage_without_year_defaults_to_none(session, tree):
     from app.models.marriage import Marriage
     from app.models.member import Member
 
-    husband = Member(full_name="Husband")
-    wife = Member(full_name="Wife")
+    husband = Member(tree_id=tree.id, full_name="Husband")
+    wife = Member(tree_id=tree.id, full_name="Wife")
     session.add_all([husband, wife])
     await session.commit()
     await session.refresh(husband)

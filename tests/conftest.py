@@ -163,3 +163,11 @@ async def make_client(client):
     yield factory
     for extra in created:
         await extra.aclose()
+
+
+@pytest.fixture
+async def tree(session):
+    """A tree for tests that create members/users straight through the ORM."""
+    from app.core.tenants import create_tree
+
+    return await create_tree(session, "Test tree", "test-tree")

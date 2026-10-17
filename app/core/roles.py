@@ -1,13 +1,15 @@
-"""Roles, account statuses and site settings: the allowed values and their defaults."""
+"""Roles, account statuses and per-tree site settings: the allowed values and their defaults."""
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.site_setting import SiteSetting
 
-ROLE_ADMIN = "admin"
+ROLE_SUPERADMIN = "superadmin"  # platform owner: no tree of their own, acts in any tree
+ROLE_ADMIN = "admin"  # administers exactly one tree
 ROLE_MEMBER = "member"
-ROLES = (ROLE_ADMIN, ROLE_MEMBER)
+ROLES = (ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_MEMBER)
+ADMIN_ROLES = (ROLE_SUPERADMIN, ROLE_ADMIN)  # may write inside the tree they act on
 
 STATUS_PENDING = "pending"
 STATUS_ACTIVE = "active"
@@ -21,8 +23,9 @@ SETTINGS: dict[str, tuple[tuple[str, ...], str]] = {
 }
 
 
-async def get_site_settings(db: AsyncSession) -> dict[str, str]:
-    stored = {row.key: row.value for row in (await db.execute(select(SiteSetting))).scalars()}
+async def get_tree_settings(db: AsyncSession, tree_id: int) -> dict[str, str]:
+    rows = await db.execute(select(SiteSetting).where(SiteSetting.tree_id == tree_id))
+    stored = {row.key: row.value for row in rows.scalars()}
     resolved = {}
     for key, (allowed, default) in SETTINGS.items():
         value = stored.get(key, default)

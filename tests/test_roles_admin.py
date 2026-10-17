@@ -1,11 +1,17 @@
 import pytest
 
+from app.core.tenants import create_user, lowest_tree
 from tests.test_roles_auth import PASSWORD, login, register, set_setting, set_user
 
 
 @pytest.fixture
-async def admin(client):
-    await register(client, "admin@example.com", "Admin")
+async def admin(client, session):
+    """The admin of the (default) tree. The platform's first registration is the tree-less superadmin."""
+    await register(client, "root@example.com", "Root")
+    tree = await lowest_tree(session)
+    await create_user(
+        session, email="admin@example.com", full_name="Admin", password=PASSWORD, role="admin", tree=tree
+    )
     await login(client, "admin@example.com")
     return client
 
@@ -137,9 +143,11 @@ async def test_settings_reject_unknown_values(admin):
 
 
 async def test_site_info_is_public_and_reflects_settings(admin, guest):
-    assert (await guest.get("/site/info")).json() == {"visibility": "private", "registration": "approval"}
+    info = (await guest.get("/site/info")).json()
+    assert (info["visibility"], info["registration"]) == ("private", "approval")
     await admin.put("/admin/settings", json={"visibility": "public", "registration": "closed"})
-    assert (await guest.get("/site/info")).json() == {"visibility": "public", "registration": "closed"}
+    info = (await guest.get("/site/info")).json()
+    assert (info["visibility"], info["registration"]) == ("public", "closed")
 
 
 # ------------------------------------------------------------------ members

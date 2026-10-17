@@ -18,6 +18,15 @@ class AdminUserUpdate(BaseModel):
     status: Status | None = None
 
 
+class SiteInfo(BaseModel):
+    """What the public login/signup pages may know about the tree a visitor refers to."""
+
+    visibility: Literal["private", "public"]
+    registration: Literal["open", "approval", "closed"]
+    tree_name: str | None = None
+    tree_slug: str | None = None
+
+
 class SiteSettingsPayload(BaseModel):
     visibility: Literal["private", "public"]
     registration: Literal["open", "approval", "closed"]
