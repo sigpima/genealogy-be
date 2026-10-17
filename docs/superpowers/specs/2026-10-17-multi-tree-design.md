@@ -54,7 +54,14 @@ Cross-tree access always answers **404** (not 403), so ids of other trees cannot
 - `/admin/users`, `/admin/settings`, `/site/info` act on the resolved tree. The last-admin guard is per tree.
 - `GET /auth/me` also returns `tree_id`, `tree_name`.
 
-## CLI (`scripts/manage.py`) — stands in for the superadmin page
+## Update (superadmin page, tree switcher, private avatars)
+
+Built afterwards: `GET/POST/PATCH /trees` (superadmin only; creating a tree creates its first admin), the
+`acting_tree` cookie as the browser-friendly twin of `X-Tree-Id`, and `GET /uploads/avatars/{file}` replacing the
+public static mount (served only to people who may read the member's tree; everything else 404). The web app got
+`/he-thong` and a header `TreeSwitcher`. Still not built: deleting a tree, moving a user between trees.
+
+## CLI (`scripts/manage.py`) — originally stood in for the superadmin page
 
 `create-tree`, `rename-tree`, `create-user` (any role, optional generated password), `set-role`, `list`.
 `seed_members.py` gains `--tree-slug`.

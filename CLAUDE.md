@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Apply migrations: `uv run alembic upgrade head`
 - Create a new migration (requires a live Postgres reachable via `DATABASE_URL`, already at `head` for existing migrations — autogenerate diffs against its current state, not from scratch): `uv run alembic revision --autogenerate -m "message"`
 - Seed a family tree from a `{name, children}` JSON file: `uv run python scripts/seed_members.py path/to/tree.json [--tree-slug SLUG]`
-- Manage trees/users (replaces the superadmin UI): `uv run python scripts/manage.py --help`
+- Manage trees/users from the command line (the web page `/he-thong` covers the common cases; `set-role superadmin` is CLI-only): `uv run python scripts/manage.py --help`
 - **Pointing the app at a throwaway database** (smoke runs): export `POSTGRES_HOST/PORT/USER/PASSWORD/DB` (or `DATABASE_URL`) in the shell — the environment beats `.env`. Still print the host/db from `get_settings().database_url` before starting anything. The dev `.env` (copy of `.env.example`) targets the compose `db` on `127.0.0.1:15432`: `docker compose up -d --wait db && uv run alembic upgrade head`.
 
 This project uses `uv`, not bare `pip`/`venv` — always prefix Python commands with `uv run`.
@@ -137,8 +137,10 @@ marriages`, no N+1).
 
 **Avatars (`Member.avatar_url`)** are stored as files on local disk
 under `Settings.upload_dir` (env `UPLOAD_DIR`, default `uploads/`),
-served back by FastAPI's `StaticFiles` mounted at `/uploads` in
-`app/main.py` — `avatar_url` in the DB is always a path like
+served back by `GET /uploads/avatars/{filename}` (`app/routers/uploads.py`, **not** a
+static mount: it looks up which member owns the file and answers only people who may read that
+member's tree — see "Multi-family trees"; everything else is a plain 404) —
+`avatar_url` in the DB is always a path like
 `/uploads/avatars/<uuid>.jpg`, never an absolute URL with a host.
 `POST /members/{id}/avatar` (multipart, field `file`) validates content
 type (`image/jpeg`/`png`/`webp` only) and size (5 MB max), deletes the
@@ -146,11 +148,9 @@ member's previous avatar file if one existed, writes the new one under
 a random UUID filename, and updates `avatar_url`; `DELETE
 /members/{id}/avatar` removes the file and clears the column. Only
 top-level tree members get avatars — `SpouseInfo` has no `avatar_url`
-field. **`app/main.py` creates `<upload_dir>/avatars/` at import time**
+field. **`app/main.py` still creates `<upload_dir>/avatars/` at import time**
 (`Path(settings.upload_dir, "avatars").mkdir(parents=True,
-exist_ok=True)`) — without this, mounting `StaticFiles` raises
-`RuntimeError` the moment `app.main` is imported, which is every single
-test via the `client` fixture. Speaking of which: **`tests/conftest.py`'s
+exist_ok=True)`) so the first upload never fails on a missing directory. Speaking of which: **`tests/conftest.py`'s
 autouse `_env` fixture points `UPLOAD_DIR` at a per-test `tmp_path`**,
 and a sibling `upload_dir` fixture exposes that same path so avatar
 tests can assert on-disk file state — this keeps test runs from ever
@@ -239,7 +239,8 @@ tree (PK `(tree_id, key)`: `visibility` private/public, `registration` open/appr
 `superadmin` (platform owner, no tree, acts in any tree), `admin` (one tree), `member` (reads one
 tree); statuses `pending` | `active` | `disabled`. Constants and setting defaults: `app/core/roles.py`.
 **Which tree a request acts on** (`app/core/tenancy.py`): a signed-in user → their own `tree_id`
-(nothing the client sends can change that); a superadmin → `X-Tree-Id` header, else the lowest-id
+(nothing the client sends can change that); a superadmin → `X-Tree-Id` header, else the `acting_tree` cookie (set by the web
+tree switcher; garbage or an unknown id is ignored, while a wrong *header* is a 404), else the lowest-id
 tree; a guest / signup → the `tree_slug` cookie (set by the web app's `/t/<slug>` route), else the
 only tree if there is exactly one. **Cross-tree ids always answer 404 (never 403), for reads and
 writes alike** — keep it that way (`_member_in_tree` in `app/routers/member.py`; the admin router's
@@ -253,8 +254,13 @@ is created if none exists; everybody else joins the resolved tree as a `member` 
 registration mode (400 when several trees exist and no cookie says which; 403 when closed).
 `login` answers 403 `account_pending` / `account_disabled`, and `get_current_user` re-checks `status`
 on every request, so disabling an account kills its token at once. Guests get a **redacted**
-`MemberDetail` (no `notes`, `residence`, `burial_*`, `phone`, `email`); `/uploads/*` (avatars) is still served
-statically without auth (random UUID names only) — tighten before relying on private mode for photos.
+`MemberDetail` (no `notes`, `residence`, `burial_*`, `phone`, `email`). **Avatar files follow the same rule**
+(`can_read_tree` in `app/core/permissions.py`: an active member of the owning tree, the superadmin, or anyone
+when that tree is public; a disabled/pending account or a bad token counts as a stranger; unknown, orphaned
+or malformed names and other trees' files all answer 404; `Cache-Control: private`). **Platform endpoints**
+(`app/routers/trees.py`, `require_superadmin`): `GET /trees` (counts, admins, `is_current`), `POST /trees`
+(a tree *and* its first admin, all-or-nothing; the generated password is returned once), `PATCH /trees/{id}`
+(name/slug).
 Admin endpoints (`app/routers/admin.py`) act on the resolved tree only: `GET/POST /admin/users`,
 `PATCH /admin/users/{id}` (role admin/member and status; **the last active admin of a tree can never be
 demoted or disabled**, 409; superadmins are invisible to tree admins and `superadmin` can't be granted

@@ -1,4 +1,5 @@
-"""Command-line administration (stands in for the superadmin web page, which is not built yet).
+"""Command-line administration (the superadmin web page /he-thong covers the common cases; use this for scripting
+and for granting `superadmin`, which the web UI deliberately cannot do).
 
     uv run python scripts/manage.py create-tree --name "Nguyễn Tộc" --slug nguyen-toc
     uv run python scripts/manage.py create-user --email a@x.com --name "A" --role admin --tree nguyen-toc
