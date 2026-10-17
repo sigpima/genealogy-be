@@ -29,6 +29,7 @@ class CalendarItem(BaseModel):
     location: str | None
     event_kind: str | None
     description: str | None
+    place_id: int | None = None
 
 
 class CalendarDay(BaseModel):
@@ -67,6 +68,7 @@ class EventBase(BaseModel):
     repeats_yearly: bool = False
     time_text: str | None = None
     location: str | None = Field(default=None, max_length=255)
+    place_id: int | None = None  # a place of the same tree (checked by the router)
     description: str | None = Field(default=None, max_length=5000)
 
     @field_validator("title")

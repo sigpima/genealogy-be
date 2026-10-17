@@ -19,6 +19,7 @@ from app.core.tenancy import TreeContext
 from app.db.session import get_db
 from app.models.marriage import Marriage
 from app.models.member import Member
+from app.models.place import Place
 from app.core.tree_layout import TreeLayout, load_layout
 from app.core import audit
 from app.routers.member import _assign, _member_in_tree, audit_member, member_defaults, member_values
@@ -200,10 +201,10 @@ CSV_COLUMNS = (
     "birth_year", "birth_month", "birth_day", "birth_is_lunar", "birth_leap_month",
     "death_year", "death_month", "death_day", "death_is_lunar", "death_leap_month",
     "courtesy_name", "title", "hometown", "residence", "phone", "email",
-    "burial_place", "burial_latitude", "burial_longitude", "notes",
+    "burial_place", "burial_latitude", "burial_longitude", "burial_place_id", "burial_plot", "notes",
 )
 INT_COLUMNS = {
-    "id", "parent_id", "mother_id", "birth_order", "birth_year", "birth_month", "birth_day",
+    "id", "parent_id", "mother_id", "burial_place_id", "birth_order", "birth_year", "birth_month", "birth_day",
     "death_year", "death_month", "death_day",
 }
 BOOL_COLUMNS = {"is_adopted", "birth_is_lunar", "birth_leap_month", "death_is_lunar", "death_leap_month"}
@@ -326,6 +327,7 @@ async def import_csv(
             )
         ).all()
     )
+    place_ids = set((await db.execute(select(Place.id).where(Place.tree_id == ctx.tree.id))).scalars().all())
     parent_of = {m.id: m.parent_id for m in tree_members.values()}  # evolves row by row, to catch cycles
 
     errors: list[dict] = []
@@ -387,6 +389,9 @@ async def import_csv(
                     continue
         if payload.mother_id is not None and (parent_id, payload.mother_id) not in spouse_pairs:
             fail("mother_id must be a recorded spouse of the father (parent_id)")
+            continue
+        if payload.burial_place_id is not None and payload.burial_place_id not in place_ids:
+            fail(f"burial_place_id {payload.burial_place_id} is not a place of this tree")
             continue
 
         if member is None:

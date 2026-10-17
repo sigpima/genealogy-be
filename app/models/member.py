@@ -39,6 +39,9 @@ class Member(Base):
     birth_order: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)  # manual order among siblings
     is_adopted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
     # The mother must be a recorded spouse of the father (parent_id); checked by the API, not the DB.
+    # GĐ6: where the person rests (a place of the tree) and the spot in it ("khu B, hàng 3, mộ 12").
+    burial_place_id: Mapped[int | None] = mapped_column(ForeignKey("places.id", ondelete="SET NULL"), nullable=True)
+    burial_plot: Mapped[str | None] = mapped_column(String(100), nullable=True)
     mother_id: Mapped[int | None] = mapped_column(ForeignKey("members.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

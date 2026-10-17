@@ -12,11 +12,15 @@ from app.core import audit
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.marriage import Marriage
+from app.models.media import Media
+from app.models.place import Place
 from app.models.member import Member
 from app.core.permissions import get_read_context, get_write_context
+from app.core.media_files import delete_media_files
 from app.core.tenancy import TreeContext
 from app.core.tree_layout import deepest_branch, load_branches
 from app.schemas.branch import BranchRef
+from app.schemas.place import PlaceRef
 from app.schemas.member import (
     MarriageCreate,
     MarriageUpdate,
@@ -58,7 +62,7 @@ PROFILE_FIELDS = (
     "phone", "email", "burial_place", "burial_latitude", "burial_longitude",
     "birth_month", "birth_day", "death_month", "death_day",
     "birth_is_lunar", "birth_leap_month", "death_is_lunar", "death_leap_month",
-    "birth_order", "is_adopted",
+    "birth_order", "is_adopted", "burial_place_id", "burial_plot",
 )
 
 
@@ -110,6 +114,15 @@ def _assign(member: Member, payload: MemberCreate | MemberUpdate) -> None:
     member.gender = payload.gender.value if payload.gender is not None else None
     for field in PROFILE_FIELDS:
         setattr(member, field, getattr(payload, field))
+
+
+async def check_place(db: AsyncSession, tree_id: int, place_id: int | None) -> None:
+    """A resting place must be a place of the same tree; anything else answers 404 like any foreign id."""
+    if place_id is None:
+        return
+    place = await db.get(Place, place_id)
+    if place is None or place.tree_id != tree_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="place not found")
 
 
 async def _check_mother(db: AsyncSession, father_id: int | None, mother_id: int | None) -> None:
@@ -307,6 +320,12 @@ async def get_member_detail(
         mother_id=member.mother_id,
     )
     if ctx.user is not None:  # guests (public tree) only get the fields above
+        detail.burial_place_id = member.burial_place_id
+        detail.burial_plot = member.burial_plot
+        if member.burial_place_id is not None:
+            place = await db.get(Place, member.burial_place_id)
+            if place is not None:
+                detail.resting_place = PlaceRef(id=place.id, name=place.name, kind=place.kind, latitude=place.latitude, longitude=place.longitude)
         detail.phone = member.phone
         detail.email = member.email
         detail.notes = member.notes
@@ -340,6 +359,7 @@ async def add_member(
     db: AsyncSession, ctx: TreeContext, payload: MemberCreate, *, request_id: int | None = None
 ) -> Member:
     """Insert a member and its audit entry into the caller's transaction (the caller commits)."""
+    await check_place(db, ctx.tree.id, payload.burial_place_id)
     member = Member(tree_id=ctx.tree.id)
     _assign(member, payload)
     db.add(member)
@@ -374,6 +394,7 @@ async def _apply_update(
                 detail="cannot set parent to one of the member's own descendants",
             )
     await _check_mother(db, payload.parent_id, payload.mother_id)
+    await check_place(db, ctx.tree.id, payload.burial_place_id)
 
     before = member_values(member)
     _assign(member, payload)
@@ -433,9 +454,11 @@ async def delete_member(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
 
     audit_member(db, ctx, "member.delete", member, audit.deletion_changes(member_values(member), member_defaults()))
+    media = list((await db.execute(select(Media).where(Media.member_id == member_id))).scalars().all())
     await db.delete(member)
     try:
         await db.commit()
+        delete_media_files(media)  # only once the rows are really gone (a refused delete keeps the files)
     except IntegrityError:
         await db.rollback()
         raise HTTPException(

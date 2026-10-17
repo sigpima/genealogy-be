@@ -10,11 +10,12 @@ from app.core.permissions import get_read_context, get_write_context
 from app.core.tenancy import TreeContext
 from app.db.session import get_db
 from app.models.event import Event
+from app.routers.member import check_place
 from app.schemas.calendar import EventCreate, EventRead, EventUpdate
 
 router = APIRouter(prefix="/events", tags=["events"])
 
-FIELDS = ("title", "kind", "calendar", "year", "month", "day", "repeats_yearly", "time_text", "location", "description")
+FIELDS = ("title", "kind", "calendar", "year", "month", "day", "repeats_yearly", "time_text", "location", "place_id", "description")
 
 
 def _values(event: Event) -> dict:
@@ -35,6 +36,7 @@ async def list_events(db: AsyncSession = Depends(get_db), ctx: TreeContext = Dep
 
 @router.post("", response_model=EventRead, status_code=status.HTTP_201_CREATED)
 async def create_event(payload: EventCreate, db: AsyncSession = Depends(get_db), ctx: TreeContext = Depends(get_write_context)) -> Event:
+    await check_place(db, ctx.tree.id, payload.place_id)
     event = Event(tree_id=ctx.tree.id, created_by=ctx.user.id, **payload.model_dump())
     db.add(event)
     await db.flush()
@@ -56,6 +58,7 @@ async def update_event(
     event_id: int, payload: EventUpdate, db: AsyncSession = Depends(get_db), ctx: TreeContext = Depends(get_write_context)
 ) -> Event:
     event = await _in_tree(db, ctx, event_id)
+    await check_place(db, ctx.tree.id, payload.place_id)
     before = _values(event)
     for name, value in payload.model_dump().items():
         setattr(event, name, value)

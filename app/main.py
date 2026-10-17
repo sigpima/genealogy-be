@@ -12,9 +12,11 @@ from app.routers.branches import router as branches_router
 from app.routers.calendar import router as calendar_router
 from app.routers.events import router as events_router
 from app.routers.member import router as member_router
+from app.routers.media import router as media_router
 from app.routers.member_search import router as member_search_router
 from app.routers.member_tools import router as member_tools_router
 from app.routers.notifications import router as notifications_router
+from app.routers.places import router as places_router
 from app.routers.requests import router as requests_router
 from app.routers.site import router as site_router
 from app.routers.trees import router as trees_router
@@ -47,6 +49,8 @@ app.include_router(requests_router)
 app.include_router(calendar_router)
 app.include_router(events_router)
 app.include_router(notifications_router)
+app.include_router(places_router)
+app.include_router(media_router)
 app.include_router(trees_router)
 app.include_router(uploads_router)
 

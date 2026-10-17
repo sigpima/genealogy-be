@@ -6,6 +6,7 @@ from email_validator import EmailNotValidError, validate_email
 from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator, model_validator
 
 from app.schemas.branch import BranchRef
+from app.schemas.place import PlaceRef
 
 
 class Gender(str, Enum):
@@ -60,8 +61,10 @@ class _ProfileFields(BaseModel):
     burial_place: str | None = Field(default=None, max_length=500)
     burial_latitude: float | None = Field(default=None, ge=-90, le=90)
     burial_longitude: float | None = Field(default=None, ge=-180, le=180)
+    burial_place_id: int | None = None  # a place of the same tree (checked by the router)
+    burial_plot: str | None = Field(default=None, max_length=100)
 
-    @field_validator("courtesy_name", "title", "residence", "burial_place", "hometown", "phone", "email", mode="before")
+    @field_validator("courtesy_name", "title", "residence", "burial_place", "hometown", "phone", "email", "burial_plot", mode="before")
     @classmethod
     def _blank_to_none(cls, value: object) -> object:
         if isinstance(value, str):
@@ -247,6 +250,8 @@ class MemberRead(BaseModel):
     birth_order: int | None = None
     is_adopted: bool = False
     mother_id: int | None = None
+    burial_place_id: int | None = None
+    burial_plot: str | None = None
     created_at: datetime
 
 
@@ -297,4 +302,7 @@ class MemberDetail(BaseModel):
     birth_order: int | None = None
     is_adopted: bool = False
     mother_id: int | None = None
+    burial_place_id: int | None = None
+    burial_plot: str | None = None
+    resting_place: PlaceRef | None = None
     spouses: list[SpouseInfo] = []

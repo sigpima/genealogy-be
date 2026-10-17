@@ -18,6 +18,7 @@ from app.core.tenancy import TreeContext
 from app.db.session import get_db
 from app.models.event import Event
 from app.models.member import Member
+from app.models.place import Place
 from app.models.tree import Tree
 from app.schemas.calendar import (
     CalendarDay,
@@ -54,13 +55,15 @@ def item_out(item: Item) -> CalendarItem:
         location=item.location,
         event_kind=item.event_kind,
         description=item.description,
+        place_id=item.place_id,
     )
 
 
-async def load_sources(db: AsyncSession, tree_id: int) -> tuple[list[Member], list[Event]]:
+async def load_sources(db: AsyncSession, tree_id: int) -> tuple[list[Member], list[Event], dict[int, str]]:
     members = list((await db.execute(select(Member).where(Member.tree_id == tree_id).order_by(Member.id))).scalars().all())
     events = list((await db.execute(select(Event).where(Event.tree_id == tree_id).order_by(Event.id))).scalars().all())
-    return members, events
+    names = dict((await db.execute(select(Place.id, Place.name).where(Place.tree_id == tree_id))).all())
+    return members, events, names
 
 
 @router.get("/month", response_model=MonthView)
@@ -72,7 +75,7 @@ async def month_view(
 ) -> MonthView:
     first = date(year, month, 1)
     last = date(year, month, _calendar.monthrange(year, month)[1])
-    members, events = await load_sources(db, ctx.tree.id)
+    members, events, places = await load_sources(db, ctx.tree.id)
     days = []
     for offset in range((last - first).days + 1):
         day = first + timedelta(days=offset)
@@ -82,7 +85,7 @@ async def month_view(
         year=year,
         month=month,
         days=days,
-        items=[item_out(i) for i in collect(members, events, first, last)],
+        items=[item_out(i) for i in collect(members, events, first, last, places)],
         incomplete=count_incomplete(members),
     )
 
@@ -94,8 +97,8 @@ async def upcoming(
     ctx: TreeContext = Depends(get_read_context),
 ) -> UpcomingView:
     today = calendar_items.vn_today()
-    members, events = await load_sources(db, ctx.tree.id)
-    return UpcomingView(items=[item_out(i) for i in collect(members, events, today, today + timedelta(days=days))])
+    members, events, places = await load_sources(db, ctx.tree.id)
+    return UpcomingView(items=[item_out(i) for i in collect(members, events, today, today + timedelta(days=days), places)])
 
 
 @router.get("/convert", response_model=Conversion)
@@ -163,8 +166,8 @@ async def feed(filename: str, db: AsyncSession = Depends(get_db)) -> Response:
     if tree is None:
         raise not_found
     today = calendar_items.vn_today()
-    members, events = await load_sources(db, tree.id)
-    items = collect(members, events, today - timedelta(days=FEED_PAST_DAYS), today + timedelta(days=FEED_AHEAD_DAYS))
+    members, events, places = await load_sources(db, tree.id)
+    items = collect(members, events, today - timedelta(days=FEED_PAST_DAYS), today + timedelta(days=FEED_AHEAD_DAYS), places)
     return Response(
         content=build_calendar(f"Lịch giỗ - {tree.name}", items),
         media_type="text/calendar; charset=utf-8",

@@ -33,6 +33,7 @@ class Item:
     location: str | None = None
     event_kind: str | None = None
     description: str | None = None
+    place_id: int | None = None
 
 
 def lunar_text(lunar: LunarDate) -> str:
@@ -106,8 +107,9 @@ def anniversaries(members: list[Member], start: date, end: date) -> list[Item]:
     return items
 
 
-def event_items(events: list[Event], start: date, end: date) -> list[Item]:
+def event_items(events: list[Event], start: date, end: date, places: dict[int, str] | None = None) -> list[Item]:
     items = []
+    places = places or {}
     for event in events:
         candidates: list[date | None] = []
         if event.calendar == "solar":
@@ -138,15 +140,18 @@ def event_items(events: list[Event], start: date, end: date) -> list[Item]:
                     subtitle=lunar_text(lunar),
                     event_id=event.id,
                     time_text=event.time_text,
-                    location=event.location,
+                    location=event.location or places.get(event.place_id or 0),
                     event_kind=event.kind,
                     description=event.description,
+                    place_id=event.place_id,
                 )
             )
     return items
 
 
-def collect(members: list[Member], events: list[Event], start: date, end: date) -> list[Item]:
+def collect(
+    members: list[Member], events: list[Event], start: date, end: date, places: dict[int, str] | None = None
+) -> list[Item]:
     """Everything in [start, end], in calendar order."""
-    items = anniversaries(members, start, end) + event_items(events, start, end)
+    items = anniversaries(members, start, end) + event_items(events, start, end, places)
     return sorted(items, key=lambda i: (i.date, i.kind != "event", i.title, i.member_id or 0, i.event_id or 0))
