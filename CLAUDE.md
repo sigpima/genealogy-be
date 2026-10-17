@@ -432,4 +432,13 @@ needed). Moving off SQLite already caught one real bug: `GET /members/tree` had 
 `ORDER BY`, so Postgres reshuffled siblings after an edit (`tests/test_member_order.py`)
 — keep list queries ordered.
 
+**Book PDF (GĐ10; design: `docs/superpowers/specs/2026-10-19-gd10-export-design.md`)** — `GET /book.pdf` (`app/routers/book.py`, admin-only via `get_write_context`, tree-scoped,
+audited as `book.export`) renders a printable "quyển phả" with ReportLab (`app/core/book.py::build_book`, **synchronous, run through `asyncio.to_thread`**): cover, a
+table of contents with real page numbers (`multiBuild` + `afterFlowable` notify), chronicles (**published articles only; drafts never**, tộc ước first, bài đệm,
+timeline), "Phả hệ theo đời" (a block per person), and "Phả đồ" — vector diagrams drawn on landscape A3 pages, **split by depth (≤4) and leaf count (≤14)** with
+"▼ xem tiếp" markers; small branches share a page (`KeepTogether`). Options (query): `chronicles`, `profiles`, `diagram`, `notes`, `photos` (default false),
+`contacts` (**default false: phone/email are never printed unless asked**), `max_generation`. Fonts are the DejaVu TTFs vendored in `app/assets/fonts/` (they cover
+Vietnamese; the book never depends on host fonts). Markdown is reduced to bold/lists/quotes/rules with every piece of text XML-escaped (`&` in a title is the classic
+ReportLab crash). `pypdf` (dev) reads the PDFs back in `tests/test_book.py`. A ~700-person tree builds in well under the 90 s the test allows.
+
 `GET /health` (public, no DB access) is the container healthcheck target.

@@ -9,6 +9,7 @@ from app.routers.admin import router as admin_router
 from app.routers.articles import router as articles_router
 from app.routers.audit import router as audit_router
 from app.routers.auth import router as auth_router
+from app.routers.book import router as book_router
 from app.routers.branches import router as branches_router
 from app.routers.calendar import router as calendar_router
 from app.routers.events import router as events_router
@@ -57,6 +58,7 @@ app.include_router(notifications_router)
 app.include_router(places_router)
 app.include_router(media_router)
 app.include_router(articles_router)
+app.include_router(book_router)
 app.include_router(timeline_router)
 app.include_router(generation_words_router)
 app.include_router(invitations_admin_router)
