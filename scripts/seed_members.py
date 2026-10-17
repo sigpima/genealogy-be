@@ -1,5 +1,7 @@
 """One-off script to load a {name, children} JSON tree into the members table.
 
+Each node may also carry an optional "title" (chức vị).
+
 Usage: uv run python scripts/seed_members.py path/to/tree.json
 """
 
@@ -19,7 +21,7 @@ async def _seed(tree: dict) -> None:
     async with session_maker() as session:
 
         async def insert(node: dict, parent_id: int | None) -> None:
-            member = Member(full_name=node["name"], parent_id=parent_id)
+            member = Member(full_name=node["name"], parent_id=parent_id, title=node.get("title"))
             session.add(member)
             await session.flush()
             for child in node.get("children", []):
