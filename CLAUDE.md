@@ -28,7 +28,11 @@ name does not end in `_test`.
 upgrade head` before starting `uvicorn`, so schema migrations are automatic on
 every container start. It's normally run via the sibling `../docker-compose.yml`
 (see `../DOCKER.md`), not built standalone — that compose file wires this
-service to a Postgres container and to `genealogy-web`.
+service to a Postgres container and to `genealogy-web`. `docker-compose.yml`
+*in this directory* is the dev/test stack (`db`, `db-test`, `api`); the `api`
+service also joins the fixed-name `genealogy_dev` network so
+`../genealogy-web/docker-compose.yml` can call `http://api:8000`. The container
+healthcheck hits `GET /health`.
 
 ## Architecture
 

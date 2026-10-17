@@ -6,6 +6,10 @@
 #   docker compose up -d --wait db        # Postgres dev (chạy `uv run uvicorn ...` ngoài Docker)
 #   docker compose up --build api         # chạy luôn API trong Docker (kéo theo db)
 #
+# Service `api` còn join network "genealogy_dev" (tên cố định) để
+# ../genealogy-web/docker-compose.yml gọi được http://api:8000 mà không cần
+# publish API ra mọi interface của máy.
+#
 # Mọi port đều chỉ bind 127.0.0.1 và KHÔNG dùng 5432 (hay bị Postgres cài sẵn
 # trên máy chiếm); đổi bằng DB_PORT / TEST_DB_PORT / API_PORT nếu trùng.
 #
@@ -87,6 +91,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    networks:
+      - default
+      - dev
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -95,6 +102,11 @@ services:
       retries: 3
       start_period: 15s
     logging: *default-logging
+
+networks:
+  # Cùng tên với network khai báo trong ../genealogy-web/docker-compose.yml.
+  dev:
+    name: genealogy_dev
 
 volumes:
   postgres_data:

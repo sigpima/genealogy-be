@@ -10,3 +10,7 @@ uploads
 Dockerfile
 .dockerignore
 docs
+docker-compose.yml
+tests
+.superpowers
+.server.log
