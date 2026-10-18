@@ -132,6 +132,19 @@ def _audit(db: AsyncSession, ctx: TreeContext, action: str, card: EventCard, tit
 # --------------------------------------------------------------------------- admin
 
 
+@admin_router.get("/cards", response_model=list[CardRead])
+async def list_all_cards(
+    open: bool = False, db: AsyncSession = Depends(get_db), ctx: TreeContext = Depends(get_write_context)  # noqa: A002 (query name)
+) -> list[CardRead]:
+    """Every card of this tree, newest first; `open=true` keeps those that still take answers (not closed, deadline not passed)."""
+    cards = (
+        await db.execute(select(EventCard).where(EventCard.tree_id == ctx.tree.id).order_by(EventCard.date.desc(), EventCard.id.desc()))
+    ).scalars().all()
+    if open:
+        cards = [c for c in cards if not c.closed and not _expired(c)]
+    return [await _read(db, c) for c in cards]
+
+
 @admin_router.get("/events/{event_id}/cards", response_model=list[CardRead])
 async def list_cards(event_id: int, db: AsyncSession = Depends(get_db), ctx: TreeContext = Depends(get_write_context)) -> list[CardRead]:
     await _event_in_tree(db, ctx, event_id)

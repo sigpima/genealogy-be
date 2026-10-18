@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import audit
+from app.core import audit, calendar_items
 from app.core.admin_overview import compute_overview
 from app.core.permissions import get_write_context
 from app.core.privacy import KEY_PREFIX, field_levels
@@ -14,6 +14,7 @@ from app.core.security import hash_password
 from app.core.tenancy import TreeContext
 from app.core.text import fold
 from app.db.session import get_db
+from app.models.event_card import EventCard
 from app.models.member import Member
 from app.models.site_setting import SiteSetting
 from app.models.user import User
@@ -28,8 +29,10 @@ from app.schemas.admin import (
     PasswordResetResult,
     PrivacyPayload,
     PrivacyRead,
+    Shares,
     SiteSettingsPayload,
 )
+from app.routers.calendar import _subscription
 from app.schemas.search import PersonRef
 
 # Everything here acts on ONE tree: the admin's own, or the one a superadmin picked (X-Tree-Id).
@@ -255,3 +258,11 @@ async def update_privacy(
 async def overview(ctx: TreeContext = Depends(get_write_context), db: AsyncSession = Depends(get_db)) -> Overview:
     """What is waiting for this tree's admin (the "Cần làm" box of the admin home)."""
     return await compute_overview(db, ctx.tree, await get_tree_settings(db, ctx.tree.id))
+
+
+@router.get("/shares", response_model=Shares)
+async def shares(ctx: TreeContext = Depends(get_write_context), db: AsyncSession = Depends(get_db)) -> Shares:
+    """The links this tree has handed out: the calendar feed and the invitation cards that still take answers."""
+    cards = (await db.execute(select(EventCard).where(EventCard.tree_id == ctx.tree.id, EventCard.closed.is_(False)))).scalars().all()
+    open_cards = sum(1 for c in cards if c.closes_on is None or calendar_items.vn_today() <= c.closes_on)
+    return Shares(calendar=_subscription(ctx.tree), open_cards=open_cards)

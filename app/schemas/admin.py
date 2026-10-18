@@ -3,6 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from app.schemas.calendar import Subscription
 from app.schemas.search import PersonRef
 from app.schemas.user import UserRead
 
@@ -79,3 +80,8 @@ class PrivacyPayload(BaseModel):
 
 class PrivacyRead(BaseModel):
     fields: dict[str, PrivacyLevel]
+
+
+class Shares(BaseModel):
+    calendar: Subscription
+    open_cards: int

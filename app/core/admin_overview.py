@@ -3,9 +3,12 @@
 Items with nothing to do are left out; notices (standing conditions worth knowing) come after the tasks.
 """
 
+import datetime
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.audit_log import AuditLog
 from app.models.change_request import ChangeRequest
 from app.models.member import Member
 from app.models.tree import Tree
@@ -24,11 +27,17 @@ async def compute_overview(db: AsyncSession, tree: Tree, settings: dict[str, str
     pending_requests = await _count(
         db, ChangeRequest.tree_id == tree.id, ChangeRequest.status == "pending", model=ChangeRequest
     )
+    since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=24)
+    locked = await _count(
+        db, AuditLog.tree_id == tree.id, AuditLog.action == "security.locked", AuditLog.created_at >= since, model=AuditLog
+    )
     tasks: list[TodoItem] = []
     if pending_users:
         tasks.append(TodoItem(key="pending_users", count=pending_users, text=f"{pending_users} người đăng ký đang chờ duyệt", href="/admin/nguoi-dung?trang-thai=pending", kind="task"))
     if pending_requests:
         tasks.append(TodoItem(key="pending_requests", count=pending_requests, text=f"{pending_requests} yêu cầu chỉnh sửa chờ duyệt", href="/yeu-cau", kind="task"))
+    if locked:
+        tasks.append(TodoItem(key="locked_accounts", count=locked, text=f"{locked} lần tài khoản bị khoá tạm vì đăng nhập sai trong 24 giờ qua", href="/admin/nhat-ky?loai=security", kind="task"))
     notices: list[TodoItem] = []
     if settings["visibility"] == "public":
         notices.append(TodoItem(key="public_tree", count=1, text="Cây đang công khai: ai cũng xem được", href="/admin/cai-dat", kind="notice"))
