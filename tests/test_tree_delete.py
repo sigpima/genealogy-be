@@ -33,7 +33,7 @@ def png() -> bytes:
 
 
 def files_under(root) -> set[str]:
-    return {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()}
+    return {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file() and p.relative_to(root).parts[0] in ("avatars", "media")}
 
 
 async def fill(admin, name):
