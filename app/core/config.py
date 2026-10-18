@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     # Operations (GĐ11): see app/core/rate_limit.py. 0 hops = never trust X-Forwarded-For.
     # Where the host's backups appear inside the container (mounted read-only; see app/core/backup_status.py).
     backup_dir: str = "/app/backups"
+    # Production safety: when set, the very first registration (which becomes the superadmin) must carry this code.
+    bootstrap_code: str = ""
     rate_limit_enabled: bool = True
     trusted_proxy_hops: int = 0
 

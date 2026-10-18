@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -67,6 +68,13 @@ def get_token_from_request(request: Request) -> str:
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not authenticated")
 
 
+@router.get("/bootstrap")
+async def bootstrap_state(db: AsyncSession = Depends(get_db)) -> dict[str, bool]:
+    """Public: is this a fresh install (the next registration becomes the superadmin) and must it carry a code? The code itself is never sent."""
+    first = (await db.execute(select(func.count()).select_from(User))).scalar_one() == 0
+    return {"first_user": first, "needs_code": first and bool(get_settings().bootstrap_code)}
+
+
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def register(
     payload: UserCreate, request: Request, db: AsyncSession = Depends(get_db)
@@ -83,6 +91,10 @@ async def register(
     user_count = (await db.execute(select(func.count()).select_from(User))).scalar_one()
     tree: Tree | None = None
     if user_count == 0:
+        expected = get_settings().bootstrap_code
+        if expected and not hmac.compare_digest((payload.bootstrap_code or "").encode(), expected.encode()):
+            # nothing has been written yet: a refused attempt leaves no tree and no user behind
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="bootstrap code required")
         await get_or_create_default_tree(db)
         role, account_status = ROLE_SUPERADMIN, STATUS_ACTIVE
     else:

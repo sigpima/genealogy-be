@@ -7,6 +7,8 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     full_name: str = Field(min_length=1)
+    #: only read for the very first registration, and only when BOOTSTRAP_CODE is configured
+    bootstrap_code: str | None = None
 
 
 class UserRead(BaseModel):
