@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
+from app.core.map_links import clean_map_url, coordinates_from
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 PLACE_KINDS = ("clan_house", "temple", "tomb", "cemetery", "other")
@@ -22,6 +23,7 @@ class PlaceBase(BaseModel):
     address: str | None = Field(default=None, max_length=500)
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
+    map_url: str | None = Field(default=None, max_length=500)  # a Google Maps link
     description: str | None = Field(default=None, max_length=5000)
     caretaker: str | None = Field(default=None, max_length=255)
     visit_notes: str | None = Field(default=None, max_length=5000)
@@ -41,6 +43,18 @@ class PlaceBase(BaseModel):
             value = value.strip()
             return value or None
         return value
+
+    @field_validator("map_url", mode="before")
+    @classmethod
+    def _check_map_url(cls, value: object) -> object:
+        return clean_map_url(value) if isinstance(value, str) or value is None else value
+
+    @model_validator(mode="after")
+    def _position_from_link(self) -> "PlaceBase":
+        found = coordinates_from(self.map_url) if self.map_url else None
+        if found is not None:
+            self.latitude, self.longitude = found
+        return self
 
     @model_validator(mode="after")
     def _gps_pair(self) -> "PlaceBase":

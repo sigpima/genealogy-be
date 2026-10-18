@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/requests", tags=["change requests"])
 
 # Everything a member may propose. Structure (parent, mother) and the resting place (a link to a place record) stay with admins.
-PROPOSABLE = tuple(f for f in WRITABLE_FIELDS if f not in ("parent_id", "mother_id", "burial_place_id", "burial_plot"))
+PROPOSABLE = tuple(f for f in WRITABLE_FIELDS if f not in ("parent_id", "mother_id", "burial_place_id", "burial_plot", "burial_map_url"))
 MIN_REPORT_LENGTH = 5
 
 

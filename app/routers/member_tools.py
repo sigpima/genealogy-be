@@ -205,7 +205,7 @@ CSV_COLUMNS = (
     "birth_year", "birth_month", "birth_day", "birth_is_lunar", "birth_leap_month",
     "death_year", "death_month", "death_day", "death_is_lunar", "death_leap_month",
     "courtesy_name", "title", "hometown", "residence", "phone", "email",
-    "burial_place", "burial_latitude", "burial_longitude", "burial_place_id", "burial_plot", "notes",
+    "burial_place", "burial_latitude", "burial_longitude", "burial_map_url", "burial_place_id", "burial_plot", "notes",
 )
 INT_COLUMNS = {
     "id", "parent_id", "mother_id", "burial_place_id", "birth_order", "birth_year", "birth_month", "birth_day",
@@ -419,6 +419,8 @@ async def import_csv(
             target = member if member is not None else Member(tree_id=ctx.tree.id)
             before = member_values(target) if member is not None else None
             _assign(target, payload)
+            if before is not None and before["burial_map_url"] is not None and target.burial_map_url is None:
+                target.burial_latitude = target.burial_longitude = None  # the position came from the link that was removed
             if member is None:
                 db.add(target)
                 await db.flush()

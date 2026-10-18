@@ -19,6 +19,7 @@ class Place(Base):
     address: Mapped[str | None] = mapped_column(String(500), nullable=True)
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    map_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     caretaker: Mapped[str | None] = mapped_column(String(255), nullable=True)
     visit_notes: Mapped[str | None] = mapped_column(Text, nullable=True)

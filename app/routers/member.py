@@ -64,7 +64,7 @@ PROFILE_FIELDS = (
     "phone", "email", "burial_place", "burial_latitude", "burial_longitude",
     "birth_month", "birth_day", "death_month", "death_day",
     "birth_is_lunar", "birth_leap_month", "death_is_lunar", "death_leap_month",
-    "birth_order", "is_adopted", "burial_place_id", "burial_plot",
+    "birth_order", "is_adopted", "burial_place_id", "burial_plot", "burial_map_url",
 )
 
 
@@ -337,6 +337,7 @@ async def get_member_detail(
         detail.burial_place = member.burial_place
         detail.burial_latitude = member.burial_latitude
         detail.burial_longitude = member.burial_longitude
+        detail.burial_map_url = member.burial_map_url
     detail.avatar_url = member.avatar_url if privacy.can_see("avatar") else None
     detail.hometown = member.hometown if privacy.can_see("hometown") else None
     return detail
@@ -406,6 +407,8 @@ async def _apply_update(
 
     before = member_values(member)
     _assign(member, payload)
+    if before["burial_map_url"] is not None and member.burial_map_url is None:
+        member.burial_latitude = member.burial_longitude = None  # the position came from the link that was removed
     changes = audit.diff_values(before, member_values(member))
     if changes:
         audit_member(db, ctx, "member.update", member, changes, request_id=request_id)

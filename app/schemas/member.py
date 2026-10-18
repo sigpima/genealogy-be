@@ -3,6 +3,7 @@ from datetime import date, datetime
 from enum import Enum
 
 from email_validator import EmailNotValidError, validate_email
+from app.core.map_links import clean_map_url, coordinates_from
 from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator, model_validator
 
 from app.schemas.branch import BranchRef
@@ -63,6 +64,7 @@ class _ProfileFields(BaseModel):
     burial_longitude: float | None = Field(default=None, ge=-180, le=180)
     burial_place_id: int | None = None  # a place of the same tree (checked by the router)
     burial_plot: str | None = Field(default=None, max_length=100)
+    burial_map_url: str | None = Field(default=None, max_length=500)  # a Google Maps link (admins only)
 
     @field_validator("courtesy_name", "title", "residence", "burial_place", "hometown", "phone", "email", "burial_plot", mode="before")
     @classmethod
@@ -89,6 +91,18 @@ class _ProfileFields(BaseModel):
         except EmailNotValidError as exc:
             raise ValueError(f"invalid email: {exc}") from None
         return value
+
+    @field_validator("burial_map_url", mode="before")
+    @classmethod
+    def _check_map_url(cls, value: object) -> object:
+        return clean_map_url(value) if isinstance(value, str) or value is None else value
+
+    @model_validator(mode="after")
+    def _position_from_link(self) -> "_ProfileFields":
+        found = coordinates_from(self.burial_map_url) if self.burial_map_url else None
+        if found is not None:
+            self.burial_latitude, self.burial_longitude = found
+        return self
 
     @model_validator(mode="after")
     def _check_gps(self) -> "_ProfileFields":
@@ -252,6 +266,7 @@ class MemberRead(BaseModel):
     mother_id: int | None = None
     burial_place_id: int | None = None
     burial_plot: str | None = None
+    burial_map_url: str | None = None
     created_at: datetime
 
 
@@ -304,5 +319,6 @@ class MemberDetail(BaseModel):
     mother_id: int | None = None
     burial_place_id: int | None = None
     burial_plot: str | None = None
+    burial_map_url: str | None = None
     resting_place: PlaceRef | None = None
     spouses: list[SpouseInfo] = []

@@ -29,7 +29,7 @@ from app.schemas.place import (
 
 router = APIRouter(prefix="/places", tags=["places"])
 
-FIELDS = ("kind", "name", "address", "latitude", "longitude", "description", "caretaker", "visit_notes")
+FIELDS = ("kind", "name", "address", "latitude", "longitude", "map_url", "description", "caretaker", "visit_notes")
 
 
 def _values(place: Place) -> dict:
@@ -124,6 +124,8 @@ async def update_place(
     before = _values(place)
     for name, value in payload.model_dump().items():
         setattr(place, name, value)
+    if before["map_url"] is not None and place.map_url is None:
+        place.latitude = place.longitude = None  # the position came from the link that was removed
     changes = diff_values(before, _values(place))
     if changes:
         audit.record(

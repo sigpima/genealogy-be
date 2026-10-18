@@ -30,7 +30,7 @@ COLUMNS: dict[str, tuple[str, ...]] = {
     "email": ("email",),
     "residence": ("residence",),
     "notes": ("notes",),
-    "burial": ("burial_place", "burial_latitude", "burial_longitude", "burial_place_id", "burial_plot"),
+    "burial": ("burial_place", "burial_latitude", "burial_longitude", "burial_place_id", "burial_plot", "burial_map_url"),
     "avatar": ("avatar_url",),
     "hometown": ("hometown",),
 }

@@ -24,6 +24,7 @@ class Member(Base):
     burial_place: Mapped[str | None] = mapped_column(String(500), nullable=True)
     burial_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     burial_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    burial_map_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     hometown: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
