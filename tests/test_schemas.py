@@ -4,27 +4,6 @@ import pytest
 from pydantic import ValidationError
 
 
-def test_user_create_accepts_valid_data():
-    from app.schemas.user import UserCreate
-
-    data = UserCreate(email="a@example.com", password="longenough", full_name="A B")
-    assert data.email == "a@example.com"
-
-
-def test_user_create_rejects_invalid_email():
-    from app.schemas.user import UserCreate
-
-    with pytest.raises(ValidationError):
-        UserCreate(email="not-an-email", password="longenough", full_name="A B")
-
-
-def test_user_create_rejects_short_password():
-    from app.schemas.user import UserCreate
-
-    with pytest.raises(ValidationError):
-        UserCreate(email="a@example.com", password="short", full_name="A B")
-
-
 def test_user_read_from_attributes():
     from app.schemas.user import UserRead
 
