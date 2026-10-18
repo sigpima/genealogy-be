@@ -6,7 +6,7 @@ every hour, re-run after a crash, or catch up after being down, and nobody gets 
 
 import asyncio
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -17,6 +17,7 @@ from app.core.calendar_items import Item, collect
 from app.core.config import get_settings
 from app.core.email import send_email
 from app.core.roles import STATUS_ACTIVE
+from app.core.system_health import set_state
 from app.models.event import Event
 from app.models.member import Member
 from app.models.notification import Notification
@@ -88,5 +89,6 @@ async def send_due_reminders(db: AsyncSession, today: date | None = None) -> dic
                             emailed += 1
                         except Exception:  # noqa: BLE001 - the in-web notification already exists; a mail failure only costs the email
                             logger.warning("could not email reminder to %s", user.email, exc_info=True)
+        await set_state(db, "reminders.last_run", datetime.now(timezone.utc).isoformat())  # the superadmin's "is the worker alive?"
         await db.commit()
     return {"notifications": created, "emails": emailed}

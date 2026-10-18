@@ -1,9 +1,16 @@
 """The superadmin's "Cần làm" list and platform numbers (see the superadmin console design). Zero-count tasks are left out."""
 
+import datetime
+from pathlib import Path
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import calendar_items
+from app.core.backup_status import read_backup_status
+from app.core.config import get_settings
 from app.core.roles import ROLE_ADMIN, STATUS_ACTIVE
+from app.core.system_health import LOW_DISK_PERCENT, disk_health, worker_health
 from app.models.media import Media
 from app.models.member import Member
 from app.models.tree import Tree
@@ -37,6 +44,16 @@ async def compute_platform_overview(db: AsyncSession) -> PlatformOverview:
         )
     if paused:
         tasks.append(TodoItem(key="trees_paused", count=paused, text=f"{paused} họ đang tạm ngưng", href="/he-thong/ho?loc=tam-ngung", kind="task"))
+    settings = get_settings()
+    if (await worker_health(db, datetime.datetime.now(datetime.timezone.utc))).state == "stale":
+        tasks.append(TodoItem(key="worker_stale", count=1, text="Bộ nhắc việc (worker) đã quá 3 giờ không chạy", href="/he-thong/he-thong", kind="task"))
+    backup = read_backup_status(Path(settings.backup_dir), datetime.datetime.now(calendar_items.VN_TIMEZONE))
+    if backup.state != "ok":
+        text = "Chưa có bản sao lưu nào được ghi nhận" if backup.state == "never" else f"Bản sao lưu gần nhất đã {backup.age_days} ngày tuổi"
+        tasks.append(TodoItem(key="backup_old", count=1, text=text, href="/he-thong/he-thong", kind="task"))
+    disk = disk_health(Path(settings.upload_dir))
+    if disk.free_percent < LOW_DISK_PERCENT:
+        tasks.append(TodoItem(key="disk_low", count=1, text=f"Ổ đĩa chỉ còn {disk.free_percent}% trống", href="/he-thong/he-thong", kind="task"))
     return PlatformOverview(
         items=tasks,
         numbers={"trees": trees, "trees_paused": paused, "members": members, "users": users, "media_bytes": media_bytes},

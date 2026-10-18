@@ -3,6 +3,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from app.core.backup_status import BackupStatusFull
+from app.core.system_health import DatabaseHealth, DiskHealth, StorageHealth, WorkerHealth
 from app.schemas.admin_overview import TodoItem
 
 
@@ -24,3 +26,16 @@ class PlatformEventRead(BaseModel):
 class PlatformEventPage(BaseModel):
     total: int
     items: list[PlatformEventRead]
+
+
+class EmailHealth(BaseModel):
+    configured: bool
+
+
+class PlatformHealth(BaseModel):
+    database: DatabaseHealth
+    worker: WorkerHealth
+    email: EmailHealth
+    disk: DiskHealth
+    storage: StorageHealth
+    backup: BackupStatusFull

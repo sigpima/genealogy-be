@@ -105,6 +105,11 @@ def _env(monkeypatch, tmp_path):
     (backups / f"gia-pha-{datetime.datetime.now(VN_TIMEZONE):%Y%m%d-%H%M%S}").mkdir(parents=True)
     (next(backups.iterdir()) / "database.dump").write_bytes(b"x")
     monkeypatch.setenv("BACKUP_DIR", str(backups))
+    # the machine's real free disk space must not decide whether the superadmin overview shows a "disk is low" task
+    import shutil
+    from collections import namedtuple
+
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: namedtuple("Usage", "total used free")(100, 50, 50))
     from app.core.config import get_settings
 
     get_settings.cache_clear()

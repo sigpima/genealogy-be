@@ -46,12 +46,12 @@ def _size(folder: Path) -> int:
     return total
 
 
-def read_backup_status(directory: Path, now: datetime.datetime, old_after_days: int = OLD_AFTER_DAYS) -> BackupStatus:
-    found: list[tuple[datetime.datetime, Path]] = []
+def _valid_backups(directory: Path) -> list[tuple[datetime.datetime, Path]]:
     try:
         entries = list(directory.iterdir())
     except OSError:  # missing, not a directory or unreadable: simply no backups to report
-        return BackupStatus(state="never")
+        return []
+    found: list[tuple[datetime.datetime, Path]] = []
     for entry in entries:
         stamp = _stamp(entry.name)
         if stamp is None:
@@ -62,6 +62,11 @@ def read_backup_status(directory: Path, now: datetime.datetime, old_after_days: 
             continue
         if has_dump:
             found.append((stamp, entry))
+    return found
+
+
+def read_backup_status(directory: Path, now: datetime.datetime, old_after_days: int = OLD_AFTER_DAYS) -> BackupStatus:
+    found = _valid_backups(directory)
     if not found:
         return BackupStatus(state="never")
     last_at, newest = max(found)
@@ -72,4 +77,41 @@ def read_backup_status(directory: Path, now: datetime.datetime, old_after_days: 
         age_days=max(0, age.days),
         size_bytes=_size(newest),
         kept=len(found),
+    )
+
+
+class RecentBackup(BaseModel):
+    name: str
+    last_at: datetime.datetime
+    size_bytes: int
+
+
+class BackupStatusFull(BackupStatus):
+    """The superadmin's view: the same status plus the whole-database member count from the newest backup's MANIFEST and the latest few backups."""
+
+    members: int | None = None
+    recent: list[RecentBackup] = []
+
+
+MEMBERS_LINE = re.compile(r"^members=(\d{1,9})\s*$", re.MULTILINE)
+
+
+def _members_in_manifest(folder: Path) -> int | None:
+    try:
+        text = (folder / "MANIFEST.txt").read_bytes()[:4096].decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    match = MEMBERS_LINE.search(text)
+    return int(match.group(1)) if match else None
+
+
+def read_backup_status_full(directory: Path, now: datetime.datetime, old_after_days: int = OLD_AFTER_DAYS) -> BackupStatusFull:
+    base = read_backup_status(directory, now, old_after_days)
+    found = sorted(_valid_backups(directory), reverse=True)
+    if not found:
+        return BackupStatusFull(**base.model_dump())
+    return BackupStatusFull(
+        **base.model_dump(),
+        members=_members_in_manifest(found[0][1]),
+        recent=[RecentBackup(name=folder.name, last_at=at, size_bytes=_size(folder)) for at, folder in found[:5]],
     )

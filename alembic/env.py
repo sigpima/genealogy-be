@@ -25,6 +25,7 @@ from app.models import (  # noqa: E402,F401  (registers models on Base.metadata)
     place,
     platform_event,
     site_setting,
+    system_state,
     tree,
     user,
 )
