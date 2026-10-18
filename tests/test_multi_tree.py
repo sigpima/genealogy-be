@@ -3,7 +3,7 @@
 import pytest
 
 from app.core.tenants import create_tree, create_user
-from tests.test_roles_auth import PASSWORD, login, register
+from tests.test_roles_auth import PASSWORD, login, make_user
 
 
 @pytest.fixture
@@ -170,9 +170,9 @@ async def test_last_admin_guard_is_per_tree(world, make_client):
 
 async def test_settings_are_per_tree(world, make_client):
     admin_a, admin_b = await signed_in(make_client, "admin_a"), await signed_in(make_client, "admin_b")
-    await admin_a.put("/admin/settings", json={"visibility": "public", "registration": "closed"})
-    assert (await admin_a.get("/admin/settings")).json() == {"visibility": "public", "registration": "closed"}
-    assert (await admin_b.get("/admin/settings")).json() == {"visibility": "private", "registration": "approval"}
+    await admin_a.put("/admin/settings", json={"visibility": "public"})
+    assert (await admin_a.get("/admin/settings")).json() == {"visibility": "public"}
+    assert (await admin_b.get("/admin/settings")).json() == {"visibility": "private"}
 
 
 # ------------------------------------------------------- guests, cookie, signup
@@ -182,7 +182,7 @@ async def test_guest_resolution_uses_the_tree_slug_cookie(world, make_client):
     admin_a, admin_b = await signed_in(make_client, "admin_a"), await signed_in(make_client, "admin_b")
     await add_member(admin_a, "Root A")
     await add_member(admin_b, "Root B")
-    await admin_a.put("/admin/settings", json={"visibility": "public", "registration": "approval"})
+    await admin_a.put("/admin/settings", json={"visibility": "public"})
 
     guest = make_client()
     guest.cookies.set("tree_slug", "ho-a")
@@ -210,41 +210,3 @@ async def test_a_single_tree_needs_no_cookie(client, session):
     await create_tree(session, "Only", "only")
     guest_client = client  # no cookie, one tree
     assert (await guest_client.get("/site/info")).json()["tree_slug"] == "only"
-
-
-async def test_signup_joins_the_tree_from_the_cookie_with_that_trees_rules(world, make_client):
-    admin_b = await signed_in(make_client, "admin_b")
-    await admin_b.put("/admin/settings", json={"visibility": "private", "registration": "closed"})
-
-    visitor_a = make_client()
-    visitor_a.cookies.set("tree_slug", "ho-a")
-    created = await register(visitor_a, "newcomer@example.com")
-    assert created.status_code == 201
-    assert (created.json()["role"], created.json()["status"], created.json()["tree_id"]) == (
-        "member", "pending", world["tree_a"].id,
-    )
-
-    visitor_b = make_client()
-    visitor_b.cookies.set("tree_slug", "ho-b")
-    assert (await register(visitor_b, "late@example.com")).status_code == 403  # B is closed
-
-
-async def test_signup_without_a_tree_is_refused_when_there_are_several(world, make_client):
-    visitor = make_client()
-    refused = await register(visitor, "lost@example.com")
-    assert refused.status_code == 400
-    assert "tree" in refused.json()["detail"]
-
-
-# -------------------------------------------------------------- bootstrap
-
-
-async def test_first_user_ever_is_superadmin_and_gets_a_default_tree(client):
-    created = await register(client, "first@example.com")
-    assert created.json()["role"] == "superadmin"
-    assert created.json()["tree_id"] is None
-    await login(client, "first@example.com")
-    member_id = (await client.post("/members", json={"full_name": "Root"})).json()["id"]
-    assert (await client.get("/members/tree")).json()["id"] == member_id
-    info = (await client.get("/site/info")).json()
-    assert info["tree_slug"] == "default"

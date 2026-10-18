@@ -1,12 +1,8 @@
+from tests.test_roles_auth import make_user
+
+
 async def _authenticate(client):
-    await client.post(
-        "/auth/register",
-        json={
-            "email": "member-tester@example.com",
-            "password": "longenough",
-            "full_name": "Tester",
-        },
-    )
+    await make_user(client, "member-tester@example.com", "Tester", role="superadmin", password="longenough")
     await client.post(
         "/auth/login",
         json={"email": "member-tester@example.com", "password": "longenough"},

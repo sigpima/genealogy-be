@@ -7,12 +7,12 @@ import pytest
 
 from app.core.tenants import create_user, lowest_tree
 from tests.test_gd2_members import add, add_spouse
-from tests.test_roles_auth import PASSWORD, login, register
+from tests.test_roles_auth import PASSWORD, login, make_user
 
 
 @pytest.fixture
 async def admin(client, session):
-    await register(client, "root@example.com", "Root")
+    await make_user(client, "root@example.com", "Root", role="superadmin")
     await create_user(
         session, email="admin@example.com", full_name="Admin", password=PASSWORD, role="admin", tree=await lowest_tree(session)
     )

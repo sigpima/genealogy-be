@@ -54,21 +54,6 @@ async def test_list_filters_by_status_role_and_folded_query(world, make_client):
     assert (await admin.get("/admin/users", params={"status": "bogus"})).status_code == 422
 
 
-async def test_bulk_approve_only_pending_users_of_this_tree(world, make_client):
-    session = world["session"]
-    mine = await create_user(session, email="mine@example.com", full_name="Mine", password=PASSWORD, role="member", tree=world["tree_a"], status="pending")
-    theirs = await create_user(session, email="theirs@example.com", full_name="Theirs", password=PASSWORD, role="member", tree=world["tree_b"], status="pending")
-    admin = await signed_in(make_client, "admin_a")
-    active_id = entry(await users(admin), "member_a@example.com")["id"]
-    r = await admin.post("/admin/users/approve", json={"ids": [mine.id, active_id, theirs.id, 9999]})
-    assert r.status_code == 200 and r.json() == {"approved": [mine.id]}
-    assert entry(await users(admin), "mine@example.com")["status"] == "active"
-    admin_b = await signed_in(make_client, "admin_b")
-    assert entry(await users(admin_b), "theirs@example.com")["status"] == "pending"
-    kinds = [(e["action"], e["details"] and e["details"].get("email")) for e in await audit_actions(admin)]
-    assert ("user.approve", "mine@example.com") in kinds
-    assert (await admin.post("/admin/users/approve", json={"ids": []})).status_code == 422
-
 
 async def test_role_and_status_changes_and_creation_are_audited(world, make_client):
     admin = await signed_in(make_client, "admin_a")
@@ -158,5 +143,4 @@ async def test_members_403_and_guests_401(world, make_client):
     guest = make_client()
     for c, code in ((member, 403), (guest, 401)):
         assert (await c.get("/admin/users")).status_code == code
-        assert (await c.post("/admin/users/approve", json={"ids": [1]})).status_code == code
         assert (await c.post("/admin/users/1/password", json={})).status_code == code

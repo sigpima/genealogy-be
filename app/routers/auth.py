@@ -1,27 +1,18 @@
 import asyncio
 import hashlib
-import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.rate_limit import limit_by_ip, limiter
 from app.core.security_events import record_failed_login
 from app.core.email import send_password_reset_email
-from app.core.roles import (
-    ROLE_MEMBER,
-    ROLE_SUPERADMIN,
-    STATUS_ACTIVE,
-    STATUS_DISABLED,
-    STATUS_PENDING,
-    get_tree_settings,
-)
-from app.core.tenancy import is_paused, public_tree
-from app.core.tenants import get_or_create_default_tree
+from app.core.roles import STATUS_ACTIVE, STATUS_DISABLED, STATUS_PENDING
+from app.core.tenancy import is_paused
 from app.core.security import (
     InvalidTokenError,
     create_access_token,
@@ -41,7 +32,7 @@ from app.schemas.auth import (
     TokenResponse,
 )
 from app.schemas.search import PersonRef
-from app.schemas.user import UserCreate, UserRead
+from app.schemas.user import UserRead
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -68,62 +59,6 @@ def get_token_from_request(request: Request) -> str:
     if auth_header and auth_header.lower().startswith("bearer "):
         return auth_header[7:]
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not authenticated")
-
-
-@router.get("/bootstrap")
-async def bootstrap_state(db: AsyncSession = Depends(get_db)) -> dict[str, bool]:
-    """Public: is this a fresh install (the next registration becomes the superadmin) and must it carry a code? The code itself is never sent."""
-    first = (await db.execute(select(func.count()).select_from(User))).scalar_one() == 0
-    return {"first_user": first, "needs_code": first and bool(get_settings().bootstrap_code)}
-
-
-@router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-async def register(
-    payload: UserCreate, request: Request, db: AsyncSession = Depends(get_db)
-) -> UserRead:
-    limit_by_ip(request, "register", 10, 3600)
-    existing = await db.execute(select(User).where(User.email == payload.email))
-    if existing.scalar_one_or_none() is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="email already registered"
-        )
-
-    # A fresh install must be usable: while there are no users at all, the first registration
-    # becomes the (tree-less) superadmin and a default tree is created if there is none yet.
-    user_count = (await db.execute(select(func.count()).select_from(User))).scalar_one()
-    tree: Tree | None = None
-    if user_count == 0:
-        expected = get_settings().bootstrap_code
-        if expected and not hmac.compare_digest((payload.bootstrap_code or "").encode(), expected.encode()):
-            # nothing has been written yet: a refused attempt leaves no tree and no user behind
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="bootstrap code required")
-        await get_or_create_default_tree(db)
-        role, account_status = ROLE_SUPERADMIN, STATUS_ACTIVE
-    else:
-        # Everybody else joins the tree they refer to (cookie, or the only tree), under THAT tree's rules.
-        tree = await public_tree(request, db, ambiguous_status=status.HTTP_400_BAD_REQUEST)
-        mode = (await get_tree_settings(db, tree.id))["registration"]
-        if mode == "closed":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="registration is closed"
-            )
-        role = ROLE_MEMBER
-        account_status = STATUS_ACTIVE if mode == "open" else STATUS_PENDING
-
-    user = User(
-        email=payload.email,
-        hashed_password=hash_password(payload.password),
-        full_name=payload.full_name,
-        role=role,
-        status=account_status,
-        tree_id=tree.id if tree else None,
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    read = UserRead.model_validate(user)
-    read.tree_name = tree.name if tree else None
-    return read
 
 
 # Failed logins an account may collect inside the window before it is locked for the rest of it (see rate_limit.py).

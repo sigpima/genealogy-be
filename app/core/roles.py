@@ -19,7 +19,6 @@ STATUSES = (STATUS_PENDING, STATUS_ACTIVE, STATUS_DISABLED)
 # key -> (allowed values, default). A missing row means the default.
 SETTINGS: dict[str, tuple[tuple[str, ...], str]] = {
     "visibility": (("private", "public"), "private"),
-    "registration": (("open", "approval", "closed"), "approval"),
 }
 
 

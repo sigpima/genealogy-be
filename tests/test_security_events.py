@@ -75,7 +75,7 @@ async def test_failures_are_still_recorded_when_the_limiter_is_off(world, make_c
 async def test_a_settings_change_is_audited_with_old_and_new_and_a_repeat_is_not(world, make_client):
     admin = make_client()
     assert (await login(admin, "admin_a@example.com")).status_code == 200
-    body = {"visibility": "public", "registration": "approval"}
+    body = {"visibility": "public"}
     assert (await admin.put("/admin/settings", json=body)).status_code == 200
     assert (await admin.put("/admin/settings", json=body)).status_code == 200
     rows = [i for i in (await admin.get("/audit", params={"limit": 50})).json()["items"] if i["action"] == "settings.update"]

@@ -30,7 +30,6 @@ async def _count(db: AsyncSession, *conditions, model) -> int:
 async def compute_overview(db: AsyncSession, tree: Tree, settings: dict[str, str]) -> Overview:
     members = await _count(db, Member.tree_id == tree.id, model=Member)
     users = await _count(db, User.tree_id == tree.id, model=User)
-    pending_users = await _count(db, User.tree_id == tree.id, User.status == "pending", model=User)
     pending_requests = await _count(
         db, ChangeRequest.tree_id == tree.id, ChangeRequest.status == "pending", model=ChangeRequest
     )
@@ -45,8 +44,6 @@ async def compute_overview(db: AsyncSession, tree: Tree, settings: dict[str, str
     ]
     backup = read_backup_status(Path(get_settings().backup_dir), datetime.datetime.now(calendar_items.VN_TIMEZONE))
     tasks: list[TodoItem] = []
-    if pending_users:
-        tasks.append(TodoItem(key="pending_users", count=pending_users, text=f"{pending_users} người đăng ký đang chờ duyệt", href="/admin/nguoi-dung?trang-thai=pending", kind="task"))
     if pending_requests:
         tasks.append(TodoItem(key="pending_requests", count=pending_requests, text=f"{pending_requests} yêu cầu chỉnh sửa chờ duyệt", href="/yeu-cau", kind="task"))
     if backup.state != "ok":
@@ -59,9 +56,7 @@ async def compute_overview(db: AsyncSession, tree: Tree, settings: dict[str, str
     notices: list[TodoItem] = []
     if settings["visibility"] == "public":
         notices.append(TodoItem(key="public_tree", count=1, text="Cây đang công khai: ai cũng xem được", href="/admin/cai-dat", kind="notice"))
-    if settings["registration"] == "open":
-        notices.append(TodoItem(key="open_registration", count=1, text="Đăng ký đang mở: ai cũng tự đăng ký được", href="/admin/cai-dat", kind="notice"))
     return Overview(
         items=[*tasks, *notices],
-        counts={"members": members, "users": users, "pending_users": pending_users, "pending_requests": pending_requests},
+        counts={"members": members, "users": users, "pending_requests": pending_requests},
     )

@@ -3,13 +3,13 @@
 import pytest
 
 from app.core.tenants import create_user, lowest_tree
-from tests.test_roles_auth import PASSWORD, login, register
+from tests.test_roles_auth import PASSWORD, login, make_user
 
 
 @pytest.fixture
 async def admin(client, session):
-    """The admin of the (default) tree; the platform's first registration is the tree-less superadmin."""
-    await register(client, "root@example.com", "Root")
+    """The admin of the (default) tree; the platform's first account is the tree-less superadmin."""
+    await make_user(client, "root@example.com", "Root", role="superadmin")
     await create_user(
         session, email="admin@example.com", full_name="Admin", password=PASSWORD, role="admin", tree=await lowest_tree(session)
     )
@@ -69,7 +69,7 @@ async def test_invalid_dates_are_rejected_by_the_api(admin):
 
 async def test_guests_do_not_see_phone_and_email_but_see_the_hometown(admin, guest, session):
     member_id = await add(admin, "Root", hometown="Hà Tĩnh", phone="0912345678", email="a@example.com", notes="n")
-    await admin.put("/admin/settings", json={"visibility": "public", "registration": "approval"})
+    await admin.put("/admin/settings", json={"visibility": "public"})
     seen = (await guest.get(f"/members/{member_id}")).json()
     assert seen["hometown"] == "Hà Tĩnh"
     assert seen["phone"] is None and seen["email"] is None and seen["notes"] is None

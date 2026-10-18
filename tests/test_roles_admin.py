@@ -1,13 +1,13 @@
 import pytest
 
 from app.core.tenants import create_user, lowest_tree
-from tests.test_roles_auth import PASSWORD, login, register, set_setting, set_user
+from tests.test_roles_auth import PASSWORD, login, make_user, set_setting, set_user
 
 
 @pytest.fixture
 async def admin(client, session):
-    """The admin of the (default) tree. The platform's first registration is the tree-less superadmin."""
-    await register(client, "root@example.com", "Root")
+    """The admin of the (default) tree. The platform's first account is the tree-less superadmin."""
+    await make_user(client, "root@example.com", "Root", role="superadmin")
     tree = await lowest_tree(session)
     await create_user(
         session, email="admin@example.com", full_name="Admin", password=PASSWORD, role="admin", tree=tree
@@ -20,8 +20,7 @@ async def admin(client, session):
 async def member(admin, make_client, session):
     """An active, logged-in non-admin."""
     other = make_client()
-    await register(other, "member@example.com", "Member")
-    await set_user(session, "member@example.com", status="active")
+    await make_user(other, "member@example.com", "Member")
     await login(other, "member@example.com")
     return other
 
@@ -44,7 +43,7 @@ async def test_admin_endpoints_need_an_admin(admin, member, guest):
     assert (await guest.get("/admin/users")).status_code == 401
     assert (await member.get("/admin/users")).status_code == 403
     assert (await member.get("/admin/settings")).status_code == 403
-    assert (await member.put("/admin/settings", json={"visibility": "public", "registration": "open"})).status_code == 403
+    assert (await member.put("/admin/settings", json={"visibility": "public"})).status_code == 403
     assert (await admin.get("/admin/users")).status_code == 200
 
 
@@ -59,7 +58,7 @@ async def test_admin_lists_users_with_role_and_status_but_no_password(admin, mem
 
 async def test_admin_approves_a_pending_account_and_it_can_then_log_in(admin, make_client):
     stranger = make_client()
-    await register(stranger, "stranger@example.com")
+    await make_user(stranger, "stranger@example.com", status="pending")
     assert (await login(stranger, "stranger@example.com")).status_code == 403
 
     pending = next(u for u in (await admin.get("/admin/users")).json() if u["email"] == "stranger@example.com")
@@ -116,38 +115,29 @@ async def test_admin_create_user_validates_input(admin):
     assert (await admin.post("/admin/users", json={**base, "email": "admin@example.com"})).status_code == 409
 
 
-async def test_creating_users_works_even_when_registration_is_closed(admin, session):
-    await set_setting(session, "registration", "closed")
-    response = await admin.post(
-        "/admin/users", json={"email": "invited@example.com", "full_name": "I", "password": PASSWORD}
-    )
-    assert response.status_code == 201
-
-
 # ------------------------------------------------------------ settings + site
 
 
 async def test_settings_default_and_update(admin):
-    assert (await admin.get("/admin/settings")).json() == {"visibility": "private", "registration": "approval"}
-    updated = await admin.put("/admin/settings", json={"visibility": "public", "registration": "closed"})
+    assert (await admin.get("/admin/settings")).json() == {"visibility": "private"}
+    updated = await admin.put("/admin/settings", json={"visibility": "public"})
     assert updated.status_code == 200
-    assert (await admin.get("/admin/settings")).json() == {"visibility": "public", "registration": "closed"}
+    assert (await admin.get("/admin/settings")).json() == {"visibility": "public"}
     # updating again must overwrite, not duplicate
-    await admin.put("/admin/settings", json={"visibility": "private", "registration": "open"})
-    assert (await admin.get("/admin/settings")).json() == {"visibility": "private", "registration": "open"}
+    await admin.put("/admin/settings", json={"visibility": "private"})
+    assert (await admin.get("/admin/settings")).json() == {"visibility": "private"}
 
 
 async def test_settings_reject_unknown_values(admin):
-    assert (await admin.put("/admin/settings", json={"visibility": "secret", "registration": "open"})).status_code == 422
-    assert (await admin.put("/admin/settings", json={"visibility": "private", "registration": "whatever"})).status_code == 422
+    assert (await admin.put("/admin/settings", json={"visibility": "secret"})).status_code == 422
 
 
 async def test_site_info_is_public_and_reflects_settings(admin, guest):
     info = (await guest.get("/site/info")).json()
-    assert (info["visibility"], info["registration"]) == ("private", "approval")
-    await admin.put("/admin/settings", json={"visibility": "public", "registration": "closed"})
+    assert info["visibility"] == "private" and "registration" not in info
+    await admin.put("/admin/settings", json={"visibility": "public"})
     info = (await guest.get("/site/info")).json()
-    assert (info["visibility"], info["registration"]) == ("public", "closed")
+    assert info["visibility"] == "public"
 
 
 # ------------------------------------------------------------------ members
@@ -178,7 +168,7 @@ async def test_private_site_refuses_guests_entirely(admin, guest):
 
 async def test_public_site_lets_guests_read_but_never_write(admin, guest):
     root = await make_member_record(admin, "Root")
-    await admin.put("/admin/settings", json={"visibility": "public", "registration": "approval"})
+    await admin.put("/admin/settings", json={"visibility": "public"})
     assert (await guest.get("/members/tree")).json()["name"] == "Root"
     assert (await guest.get(f"/members/{root}")).status_code == 200
     assert (await guest.post("/members", json={"full_name": "X"})).status_code == 401
@@ -199,7 +189,7 @@ async def test_guests_get_a_redacted_detail_while_members_and_admins_see_everyth
         burial_longitude=105.7,
         title="Thủy Tổ",
     )
-    await admin.put("/admin/settings", json={"visibility": "public", "registration": "approval"})
+    await admin.put("/admin/settings", json={"visibility": "public"})
 
     seen_by_guest = (await guest.get(f"/members/{root}")).json()
     assert seen_by_guest["birth_year"] == 1900 and seen_by_guest["title"] == "Thủy Tổ"
@@ -216,7 +206,7 @@ async def test_guests_get_a_redacted_detail_while_members_and_admins_see_everyth
 
 async def test_a_stale_cookie_does_not_lock_a_guest_out_of_a_public_site(admin, make_client):
     await make_member_record(admin, "Root")
-    await admin.put("/admin/settings", json={"visibility": "public", "registration": "approval"})
+    await admin.put("/admin/settings", json={"visibility": "public"})
     visitor = make_client()
     visitor.cookies.set("access_token", "not-a-valid-token")
     assert (await visitor.get("/members/tree")).status_code == 200
@@ -224,6 +214,6 @@ async def test_a_stale_cookie_does_not_lock_a_guest_out_of_a_public_site(admin, 
 
 async def test_a_disabled_user_is_refused_even_on_a_public_site(admin, member, session):
     await make_member_record(admin, "Root")
-    await admin.put("/admin/settings", json={"visibility": "public", "registration": "approval"})
+    await admin.put("/admin/settings", json={"visibility": "public"})
     await set_user(session, "member@example.com", status="disabled")
     assert (await member.get("/members/tree")).status_code == 403

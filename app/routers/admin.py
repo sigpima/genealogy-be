@@ -15,7 +15,7 @@ from app.core.config import get_settings
 from app.core.data_health import check_layout, check_media
 from app.core.permissions import get_write_context
 from app.core.privacy import KEY_PREFIX, field_levels
-from app.core.roles import ROLE_ADMIN, STATUS_ACTIVE, STATUS_PENDING, get_tree_settings
+from app.core.roles import ROLE_ADMIN, STATUS_ACTIVE, get_tree_settings
 from app.core.security import hash_password
 from app.core.tenancy import TreeContext
 from app.core.text import fold
@@ -31,8 +31,6 @@ from app.schemas.admin import (
     AdminUserCreate,
     AdminUserRead,
     AdminUserUpdate,
-    BulkApproved,
-    BulkApprove,
     PasswordReset,
     PasswordResetResult,
     PrivacyPayload,
@@ -111,23 +109,6 @@ async def create_user(
     await db.commit()
     await db.refresh(user)
     return (await _reads(db, [user], ctx))[0]
-
-
-@router.post("/users/approve", response_model=BulkApproved)
-async def approve_users(
-    payload: BulkApprove, ctx: TreeContext = Depends(get_write_context), db: AsyncSession = Depends(get_db)
-) -> BulkApproved:
-    """Approve every pending user of this tree among `ids`; any other id (active, another tree, unknown) is ignored."""
-    rows = (
-        await db.execute(
-            select(User).where(User.id.in_(payload.ids), User.tree_id == ctx.tree.id, User.status == STATUS_PENDING).order_by(User.id)
-        )
-    ).scalars().all()
-    for user in rows:
-        user.status = STATUS_ACTIVE
-        audit.record(db, tree_id=ctx.tree.id, actor=ctx.user, action="user.approve", details={"email": user.email})
-    await db.commit()
-    return BulkApproved(approved=[u.id for u in rows])
 
 
 @router.post("/users/{user_id}/password", response_model=PasswordResetResult)

@@ -31,14 +31,6 @@ class AdminUserRead(UserRead):
     member: PersonRef | None = None
 
 
-class BulkApprove(BaseModel):
-    ids: list[int] = Field(min_length=1, max_length=200)
-
-
-class BulkApproved(BaseModel):
-    approved: list[int]
-
-
 class PasswordReset(BaseModel):
     password: str | None = Field(default=None, min_length=8)
 
@@ -48,17 +40,15 @@ class PasswordResetResult(BaseModel):
 
 
 class SiteInfo(BaseModel):
-    """What the public login/signup pages may know about the tree a visitor refers to."""
+    """What the public login page may know about the tree a visitor refers to."""
 
     visibility: Literal["private", "public"]
-    registration: Literal["open", "approval", "closed"]
     tree_name: str | None = None
     tree_slug: str | None = None
 
 
 class SiteSettingsPayload(BaseModel):
     visibility: Literal["private", "public"]
-    registration: Literal["open", "approval", "closed"]
 
 
 PrivacyLevel = Literal["admin", "member", "public"]

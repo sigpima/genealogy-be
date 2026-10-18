@@ -36,7 +36,7 @@ async def test_audit_filters_by_kind(world, make_client):
     admin = await signed_in(make_client, "admin_a")
     await admin.post("/members", json={"full_name": "Tổ"})  # member.create -> data
     await admin.post("/admin/users", json={"email": "n@example.com", "full_name": "N", "password": PASSWORD, "role": "member"})  # user.create -> people
-    await admin.put("/admin/settings", json={"visibility": "public", "registration": "approval"})  # settings.update -> settings
+    await admin.put("/admin/settings", json={"visibility": "public"})  # settings.update -> settings
     await admin.put("/admin/privacy", json={"phone": "admin"})  # privacy.update -> settings
     for _ in range(2):
         await make_client().post("/auth/login", json={"email": "member_a@example.com", "password": "wrong-password"})  # security.login_failed

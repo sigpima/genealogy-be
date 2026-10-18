@@ -3,10 +3,20 @@ from sqlalchemy import text
 PASSWORD = "longenough"
 
 
-async def register(client, email, name="User"):
-    return await client.post(
-        "/auth/register", json={"email": email, "password": PASSWORD, "full_name": name}
-    )
+async def make_user(client, email, name="User", *, role="member", status="active", password=PASSWORD):
+    """Create an account straight in the database: there is no self-service registration any more.
+
+    The platform superadmin belongs to no tree; everybody else joins the default tree (made if missing, like a fresh install).
+    """
+    from app.core.tenants import create_user, get_or_create_default_tree
+    from app.db.session import get_db
+    from app.main import app
+
+    async for db in app.dependency_overrides[get_db]():
+        tree = await get_or_create_default_tree(db)
+        return await create_user(
+            db, email=email, full_name=name, password=password, role=role, tree=None if role == "superadmin" else tree, status=status
+        )
 
 
 async def login(client, email, password=PASSWORD):
@@ -35,51 +45,22 @@ async def set_user(session, email, **columns):
     await session.commit()
 
 
-async def test_first_registered_user_becomes_active_superadmin(client):
-    response = await register(client, "first@example.com")
-    assert response.status_code == 201
-    assert response.json()["role"] == "superadmin"
-    assert response.json()["status"] == "active"
-
-
-async def test_later_registrations_wait_for_approval_by_default(client):
-    await register(client, "first@example.com")
-    response = await register(client, "second@example.com")
-    assert response.status_code == 201
-    assert response.json()["role"] == "member"
-    assert response.json()["status"] == "pending"
-
-
-async def test_registration_open_activates_new_members_at_once(client, session):
-    await register(client, "first@example.com")
-    await set_setting(session, "registration", "open")
-    response = await register(client, "second@example.com")
-    assert (response.json()["role"], response.json()["status"]) == ("member", "active")
-
-
-async def test_registration_closed_is_refused_but_the_very_first_user_can_still_bootstrap(client, session, tree):
-    await set_setting(session, "registration", "closed", tree.id)
-    assert (await register(client, "first@example.com")).status_code == 201
-    refused = await register(client, "second@example.com")
-    assert refused.status_code == 403
-
-
 async def test_pending_user_cannot_log_in(client):
-    await register(client, "first@example.com")
-    await register(client, "second@example.com")
+    await make_user(client, "first@example.com", role="superadmin")
+    await make_user(client, "second@example.com", status="pending")
     response = await login(client, "second@example.com")
     assert response.status_code == 403
     assert response.json()["detail"] == "account_pending"
 
 
 async def test_wrong_password_is_still_401_for_a_pending_user(client):
-    await register(client, "first@example.com")
-    await register(client, "second@example.com")
+    await make_user(client, "first@example.com", role="superadmin")
+    await make_user(client, "second@example.com", status="pending")
     assert (await login(client, "second@example.com", "wrong-password")).status_code == 401
 
 
 async def test_disabled_user_cannot_log_in(client, session):
-    await register(client, "first@example.com")
+    await make_user(client, "first@example.com", role="superadmin")
     await set_user(session, "first@example.com", status="disabled")
     response = await login(client, "first@example.com")
     assert response.status_code == 403
@@ -87,7 +68,7 @@ async def test_disabled_user_cannot_log_in(client, session):
 
 
 async def test_existing_token_stops_working_the_moment_the_user_is_disabled(client, session):
-    await register(client, "first@example.com")
+    await make_user(client, "first@example.com", role="superadmin")
     await login(client, "first@example.com")
     assert (await client.get("/auth/me")).status_code == 200
     await set_user(session, "first@example.com", status="disabled")
@@ -95,7 +76,7 @@ async def test_existing_token_stops_working_the_moment_the_user_is_disabled(clie
 
 
 async def test_me_returns_role_and_status(client):
-    await register(client, "first@example.com")
+    await make_user(client, "first@example.com", role="superadmin")
     await login(client, "first@example.com")
     body = (await client.get("/auth/me")).json()
     assert (body["role"], body["status"]) == ("superadmin", "active")

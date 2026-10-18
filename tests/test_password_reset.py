@@ -1,3 +1,6 @@
+from tests.test_roles_auth import make_user
+
+
 async def test_forgot_password_existing_user_sends_email(client, monkeypatch):
     sent = []
     monkeypatch.setattr(
@@ -5,10 +8,7 @@ async def test_forgot_password_existing_user_sends_email(client, monkeypatch):
         lambda to_email, reset_url: sent.append({"to_email": to_email, "reset_url": reset_url}),
     )
 
-    await client.post(
-        "/auth/register",
-        json={"email": "a@example.com", "password": "old-password", "full_name": "A B"},
-    )
+    await make_user(client, "a@example.com", "A B", role="superadmin", password="old-password")
 
     response = await client.post("/auth/forgot-password", json={"email": "a@example.com"})
     assert response.status_code == 200
@@ -35,10 +35,7 @@ async def test_reset_password_with_valid_token_changes_password(client, monkeypa
         lambda to_email, reset_url: sent.append(reset_url),
     )
 
-    await client.post(
-        "/auth/register",
-        json={"email": "a@example.com", "password": "old-password", "full_name": "A B"},
-    )
+    await make_user(client, "a@example.com", "A B", role="superadmin", password="old-password")
     await client.post("/auth/forgot-password", json={"email": "a@example.com"})
     token = sent[0].split("token=")[1]
 
@@ -73,10 +70,7 @@ async def test_reset_password_rejects_expired_token(client, monkeypatch):
     )
     monkeypatch.setattr("app.routers.auth.RESET_TOKEN_EXPIRE_MINUTES", -1)
 
-    await client.post(
-        "/auth/register",
-        json={"email": "a@example.com", "password": "old-password", "full_name": "A B"},
-    )
+    await make_user(client, "a@example.com", "A B", role="superadmin", password="old-password")
     await client.post("/auth/forgot-password", json={"email": "a@example.com"})
     token = sent[0].split("token=")[1]
 
@@ -93,10 +87,7 @@ async def test_reset_password_rejects_reused_token(client, monkeypatch):
         lambda to_email, reset_url: sent.append(reset_url),
     )
 
-    await client.post(
-        "/auth/register",
-        json={"email": "a@example.com", "password": "old-password", "full_name": "A B"},
-    )
+    await make_user(client, "a@example.com", "A B", role="superadmin", password="old-password")
     await client.post("/auth/forgot-password", json={"email": "a@example.com"})
     token = sent[0].split("token=")[1]
 
@@ -117,10 +108,7 @@ async def test_reset_password_rejects_short_password(client, monkeypatch):
         "app.routers.auth.send_password_reset_email",
         lambda to_email, reset_url: sent.append(reset_url),
     )
-    await client.post(
-        "/auth/register",
-        json={"email": "a@example.com", "password": "old-password", "full_name": "A B"},
-    )
+    await make_user(client, "a@example.com", "A B", role="superadmin", password="old-password")
     await client.post("/auth/forgot-password", json={"email": "a@example.com"})
     token = sent[0].split("token=")[1]
 

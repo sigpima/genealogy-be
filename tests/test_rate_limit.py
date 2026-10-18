@@ -89,7 +89,7 @@ async def test_without_a_trusted_proxy_the_shared_address_gets_a_looser_limit(wo
     assert codes[:100] == [401] * 100 and codes[100:] == [429, 429]
 
 
-async def test_register_and_forgot_password_are_limited_per_address(world, make_client, on, monkeypatch):
+async def test_forgot_password_is_limited_per_address(world, make_client, on, monkeypatch):
     from app.core.config import get_settings
 
     monkeypatch.setenv("TRUSTED_PROXY_HOPS", "1")
@@ -97,8 +97,6 @@ async def test_register_and_forgot_password_are_limited_per_address(world, make_
     c = make_client()
     c.headers["X-Forwarded-For"] = "203.0.113.60"
     c.cookies.set("tree_slug", "ho-a")
-    codes = [(await c.post("/auth/register", json={"email": f"n{i}@example.com", "full_name": "N", "password": "longenough1"})).status_code for i in range(11)]
-    assert codes[-1] == 429 and 429 not in codes[:10]
     codes = [(await c.post("/auth/forgot-password", json={"email": "x@example.com"})).status_code for i in range(6)]
     assert codes[-1] == 429 and codes[:5] == [200] * 5
 

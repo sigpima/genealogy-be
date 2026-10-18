@@ -1,27 +1,8 @@
-async def test_register_returns_user_without_password(client):
-    response = await client.post(
-        "/auth/register",
-        json={"email": "a@example.com", "password": "longenough", "full_name": "A B"},
-    )
-    assert response.status_code == 201
-    body = response.json()
-    assert body["email"] == "a@example.com"
-    assert "password" not in body
-    assert "hashed_password" not in body
-
-
-async def test_register_rejects_duplicate_email(client):
-    payload = {"email": "dup@example.com", "password": "longenough", "full_name": "A B"}
-    await client.post("/auth/register", json=payload)
-    response = await client.post("/auth/register", json=payload)
-    assert response.status_code == 409
+from tests.test_roles_auth import make_user
 
 
 async def test_login_returns_token_for_correct_credentials(client):
-    await client.post(
-        "/auth/register",
-        json={"email": "a@example.com", "password": "longenough", "full_name": "A B"},
-    )
+    await make_user(client, "a@example.com", "A B", role="superadmin", password="longenough")
     response = await client.post(
         "/auth/login", json={"email": "a@example.com", "password": "longenough"}
     )
@@ -32,10 +13,7 @@ async def test_login_returns_token_for_correct_credentials(client):
 
 
 async def test_login_rejects_wrong_password(client):
-    await client.post(
-        "/auth/register",
-        json={"email": "a@example.com", "password": "longenough", "full_name": "A B"},
-    )
+    await make_user(client, "a@example.com", "A B", role="superadmin", password="longenough")
     response = await client.post(
         "/auth/login", json={"email": "a@example.com", "password": "wrong-pass"}
     )
@@ -43,10 +21,7 @@ async def test_login_rejects_wrong_password(client):
 
 
 async def test_me_returns_current_user_with_valid_token(client):
-    await client.post(
-        "/auth/register",
-        json={"email": "a@example.com", "password": "longenough", "full_name": "A B"},
-    )
+    await make_user(client, "a@example.com", "A B", role="superadmin", password="longenough")
     login_response = await client.post(
         "/auth/login", json={"email": "a@example.com", "password": "longenough"}
     )
@@ -63,10 +38,7 @@ async def test_me_rejects_missing_token(client):
 
 
 async def test_login_sets_httponly_cookie(client):
-    await client.post(
-        "/auth/register",
-        json={"email": "cookie@example.com", "password": "longenough", "full_name": "A B"},
-    )
+    await make_user(client, "cookie@example.com", "A B", role="superadmin", password="longenough")
     response = await client.post(
         "/auth/login", json={"email": "cookie@example.com", "password": "longenough"}
     )
@@ -76,10 +48,7 @@ async def test_login_sets_httponly_cookie(client):
 
 
 async def test_me_succeeds_via_cookie_alone(client):
-    await client.post(
-        "/auth/register",
-        json={"email": "cookie2@example.com", "password": "longenough", "full_name": "A B"},
-    )
+    await make_user(client, "cookie2@example.com", "A B", role="superadmin", password="longenough")
     await client.post(
         "/auth/login", json={"email": "cookie2@example.com", "password": "longenough"}
     )
@@ -90,10 +59,7 @@ async def test_me_succeeds_via_cookie_alone(client):
 
 
 async def test_logout_clears_cookie_and_me_then_requires_header(client):
-    await client.post(
-        "/auth/register",
-        json={"email": "cookie3@example.com", "password": "longenough", "full_name": "A B"},
-    )
+    await make_user(client, "cookie3@example.com", "A B", role="superadmin", password="longenough")
     await client.post(
         "/auth/login", json={"email": "cookie3@example.com", "password": "longenough"}
     )
