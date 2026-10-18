@@ -496,4 +496,7 @@ never a password/token in `details`. `tree.create` is committed after `create_tr
 `POST /trees/{id}/admins/{user_id}/password` (generated or typed, returned once). Only admins of THAT family are addressable (member, other family's user, superadmin, unknown id = the same 404). All write `platform_events` (`admin.create|promote|update|password_reset`, email only, never a password) and work on a paused family.
 `manage.py set-password --email E [--password P]` is the way back in for a forgotten superadmin password (prints a generated one once).
 
+**Going in to help and the platform log (superadmin console phase 4)** — `POST /trees/{id}/support` writes `support.enter`; `GET /platform/events?action=&tree_id=&since=&until=&limit=&offset=` (action is a **prefix**, dates are whole days in Vietnam time, newest first). The log is advisory for entry: the web calls `support` before setting the `acting_tree` cookie (`enterFamily` in `lib/platform/trees.ts`; if the call fails it does not switch),
+but a hand-sent `X-Tree-Id` is not caught — what the superadmin does *inside* a family is in that family's own audit log under their name.
+
 `GET /health` (public, no DB access) is the container healthcheck target.
