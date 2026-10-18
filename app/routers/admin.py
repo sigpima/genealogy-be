@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import secrets
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -6,24 +9,47 @@ from app.core import audit
 from app.core.admin_overview import compute_overview
 from app.core.permissions import get_write_context
 from app.core.privacy import KEY_PREFIX, field_levels
-from app.core.roles import ROLE_ADMIN, STATUS_ACTIVE, get_tree_settings
+from app.core.roles import ROLE_ADMIN, STATUS_ACTIVE, STATUS_PENDING, get_tree_settings
 from app.core.security import hash_password
 from app.core.tenancy import TreeContext
+from app.core.text import fold
 from app.db.session import get_db
+from app.models.member import Member
 from app.models.site_setting import SiteSetting
 from app.models.user import User
 from app.schemas.admin_overview import Overview
-from app.schemas.admin import AdminUserCreate, AdminUserUpdate, PrivacyPayload, PrivacyRead, SiteSettingsPayload
-from app.schemas.user import UserRead
+from app.schemas.admin import (
+    AdminUserCreate,
+    AdminUserRead,
+    AdminUserUpdate,
+    BulkApproved,
+    BulkApprove,
+    PasswordReset,
+    PasswordResetResult,
+    PrivacyPayload,
+    PrivacyRead,
+    SiteSettingsPayload,
+)
+from app.schemas.search import PersonRef
 
 # Everything here acts on ONE tree: the admin's own, or the one a superadmin picked (X-Tree-Id).
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-def _read(user: User, ctx: TreeContext) -> UserRead:
-    read = UserRead.model_validate(user)
-    read.tree_name = ctx.tree.name if user.tree_id == ctx.tree.id else None
-    return read
+async def _reads(db: AsyncSession, users: list[User], ctx: TreeContext) -> list[AdminUserRead]:
+    """Users with their tree name and the person they are linked to (one query for all the people)."""
+    linked = {u.member_id for u in users if u.member_id is not None}
+    names = (
+        dict((await db.execute(select(Member.id, Member.full_name).where(Member.id.in_(linked)))).all()) if linked else {}
+    )
+    reads = []
+    for user in users:
+        read = AdminUserRead.model_validate(user)
+        read.tree_name = ctx.tree.name if user.tree_id == ctx.tree.id else None
+        if user.member_id in names:
+            read.member = PersonRef(id=user.member_id, name=names[user.member_id])
+        reads.append(read)
+    return reads
 
 
 async def _user_in_tree(db: AsyncSession, ctx: TreeContext, user_id: int) -> User | None:
@@ -32,20 +58,32 @@ async def _user_in_tree(db: AsyncSession, ctx: TreeContext, user_id: int) -> Use
     return user if user is not None and user.tree_id == ctx.tree.id else None
 
 
-@router.get("/users", response_model=list[UserRead])
+@router.get("/users", response_model=list[AdminUserRead])
 async def list_users(
-    ctx: TreeContext = Depends(get_write_context), db: AsyncSession = Depends(get_db)
-) -> list[UserRead]:
-    rows = await db.execute(select(User).where(User.tree_id == ctx.tree.id).order_by(User.id))
-    return [_read(user, ctx) for user in rows.scalars().all()]
+    q: str | None = None,
+    status_: Literal["pending", "active", "disabled"] | None = Query(default=None, alias="status"),
+    role: Literal["admin", "member"] | None = None,
+    ctx: TreeContext = Depends(get_write_context),
+    db: AsyncSession = Depends(get_db),
+) -> list[AdminUserRead]:
+    conditions = [User.tree_id == ctx.tree.id]
+    if status_ is not None:
+        conditions.append(User.status == status_)
+    if role is not None:
+        conditions.append(User.role == role)
+    rows = list((await db.execute(select(User).where(*conditions).order_by(User.id))).scalars().all())
+    if q and q.strip():
+        needle = fold(q)
+        rows = [u for u in rows if needle in fold(u.full_name) or needle in fold(u.email)]
+    return await _reads(db, rows, ctx)
 
 
-@router.post("/users", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+@router.post("/users", response_model=AdminUserRead, status_code=status.HTTP_201_CREATED)
 async def create_user(
     payload: AdminUserCreate,
     ctx: TreeContext = Depends(get_write_context),
     db: AsyncSession = Depends(get_db),
-) -> UserRead:
+) -> AdminUserRead:
     existing = await db.execute(select(User).where(User.email == payload.email))
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email already registered")
@@ -58,18 +96,54 @@ async def create_user(
         tree_id=ctx.tree.id,
     )
     db.add(user)
+    audit.record(db, tree_id=ctx.tree.id, actor=ctx.user, action="user.create", details={"email": payload.email, "role": payload.role})
     await db.commit()
     await db.refresh(user)
-    return _read(user, ctx)
+    return (await _reads(db, [user], ctx))[0]
 
 
-@router.patch("/users/{user_id}", response_model=UserRead)
+@router.post("/users/approve", response_model=BulkApproved)
+async def approve_users(
+    payload: BulkApprove, ctx: TreeContext = Depends(get_write_context), db: AsyncSession = Depends(get_db)
+) -> BulkApproved:
+    """Approve every pending user of this tree among `ids`; any other id (active, another tree, unknown) is ignored."""
+    rows = (
+        await db.execute(
+            select(User).where(User.id.in_(payload.ids), User.tree_id == ctx.tree.id, User.status == STATUS_PENDING).order_by(User.id)
+        )
+    ).scalars().all()
+    for user in rows:
+        user.status = STATUS_ACTIVE
+        audit.record(db, tree_id=ctx.tree.id, actor=ctx.user, action="user.approve", details={"email": user.email})
+    await db.commit()
+    return BulkApproved(approved=[u.id for u in rows])
+
+
+@router.post("/users/{user_id}/password", response_model=PasswordResetResult)
+async def reset_password(
+    user_id: int,
+    payload: PasswordReset,
+    ctx: TreeContext = Depends(get_write_context),
+    db: AsyncSession = Depends(get_db),
+) -> PasswordResetResult:
+    """Set a new password for one of this tree's users and return it ONCE (it is never stored in clear or audited)."""
+    user = await _user_in_tree(db, ctx, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
+    password = payload.password or secrets.token_urlsafe(9)
+    user.hashed_password = hash_password(password)
+    audit.record(db, tree_id=ctx.tree.id, actor=ctx.user, action="user.password_reset", details={"email": user.email})
+    await db.commit()
+    return PasswordResetResult(password=password)
+
+
+@router.patch("/users/{user_id}", response_model=AdminUserRead)
 async def update_user(
     user_id: int,
     payload: AdminUserUpdate,
     ctx: TreeContext = Depends(get_write_context),
     db: AsyncSession = Depends(get_db),
-) -> UserRead:
+) -> AdminUserRead:
     user = await _user_in_tree(db, ctx, user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
@@ -98,11 +172,29 @@ async def update_user(
                 detail="there must always be at least one active admin",
             )
 
-    user.role = new_role
-    user.status = new_status
+    before = {"role": user.role, "status": user.status, "member_id": user.member_id}
+    after = {"role": new_role, "status": new_status, "member_id": user.member_id}
+    if "member_id" in payload.model_fields_set:
+        if payload.member_id is not None:
+            person = await db.get(Member, payload.member_id)
+            if person is None or person.tree_id != ctx.tree.id:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
+            taken = (
+                await db.execute(select(User.id).where(User.member_id == payload.member_id, User.id != user.id))
+            ).scalar_one_or_none()
+            if taken is not None:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="that person is already linked to another account")
+        after["member_id"] = payload.member_id
+
+    user.role, user.status, user.member_id = new_role, new_status, after["member_id"]
+    changes = audit.diff_values(before, after)
+    if changes:
+        audit.record(
+            db, tree_id=ctx.tree.id, actor=ctx.user, action="user.update", changes=changes, details={"email": user.email}
+        )
     await db.commit()
     await db.refresh(user)
-    return _read(user, ctx)
+    return (await _reads(db, [user], ctx))[0]
 
 
 @router.get("/settings", response_model=SiteSettingsPayload)

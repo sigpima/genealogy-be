@@ -130,6 +130,8 @@ async def login(
     if user.status == STATUS_DISABLED:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="account_disabled")
 
+    user.last_login_at = datetime.now(timezone.utc)
+    await db.commit()
     token = create_access_token(subject=user.email)
     settings = get_settings()
     response.set_cookie(

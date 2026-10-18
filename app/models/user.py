@@ -1,13 +1,17 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, func, true
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, func, text, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.models import member  # noqa: F401  (the member_id foreign key needs its target table registered)
 
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        Index("uq_users_member_id", "member_id", unique=True, postgresql_where=text("member_id IS NOT NULL")),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
@@ -24,3 +28,7 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    # Admin console: when the user last logged in (NULL = never recorded, which includes everyone from before this column existed)
+    # and, optionally, which person of the tree this account is (display only; the person is deleted -> the link clears).
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    member_id: Mapped[int | None] = mapped_column(ForeignKey("members.id", ondelete="SET NULL"), nullable=True)

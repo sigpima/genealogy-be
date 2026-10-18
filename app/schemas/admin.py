@@ -1,6 +1,10 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+from app.schemas.search import PersonRef
+from app.schemas.user import UserRead
 
 Role = Literal["admin", "member"]
 Status = Literal["pending", "active", "disabled"]
@@ -14,8 +18,32 @@ class AdminUserCreate(BaseModel):
 
 
 class AdminUserUpdate(BaseModel):
+    """Only the fields present change; `member_id: null` explicitly unlinks the person."""
+
     role: Role | None = None
     status: Status | None = None
+    member_id: int | None = None
+
+
+class AdminUserRead(UserRead):
+    last_login_at: datetime | None = None
+    member: PersonRef | None = None
+
+
+class BulkApprove(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=200)
+
+
+class BulkApproved(BaseModel):
+    approved: list[int]
+
+
+class PasswordReset(BaseModel):
+    password: str | None = Field(default=None, min_length=8)
+
+
+class PasswordResetResult(BaseModel):
+    password: str
 
 
 class SiteInfo(BaseModel):
