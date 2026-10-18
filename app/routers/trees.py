@@ -286,3 +286,11 @@ async def reset_family_admin_password(
     platform_log.record(db, actor=actor, action="admin.password_reset", tree=tree, details={"email": user.email})
     await db.commit()
     return PasswordOut(password=password)
+
+
+@router.post("/{tree_id}/support", status_code=status.HTTP_204_NO_CONTENT)
+async def enter_for_support(tree_id: int, actor: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)) -> None:
+    """Written by the web just before the superadmin switches into a family: the platform log's "who went in, when"."""
+    tree = await _tree_or_404(db, tree_id)
+    platform_log.record(db, actor=actor, action="support.enter", tree=tree)
+    await db.commit()
