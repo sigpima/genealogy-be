@@ -89,6 +89,7 @@ async def send_due_reminders(db: AsyncSession, today: date | None = None) -> dic
                             emailed += 1
                         except Exception:  # noqa: BLE001 - the in-web notification already exists; a mail failure only costs the email
                             logger.warning("could not email reminder to %s", user.email, exc_info=True)
-        await set_state(db, "reminders.last_run", datetime.now(timezone.utc).isoformat())  # the superadmin's "is the worker alive?"
         await db.commit()
+    await set_state(db, "reminders.last_run", datetime.now(timezone.utc).isoformat())  # once per pass, even when there was nothing to remind about
+    await db.commit()
     return {"notifications": created, "emails": emailed}

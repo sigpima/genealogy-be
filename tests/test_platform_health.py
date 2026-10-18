@@ -141,3 +141,12 @@ async def test_only_the_superadmin_and_the_tree_admins_status_stays_small(world,
     assert (await admin.get("/platform/health")).status_code == 403
     assert (await make_client().get("/platform/health")).status_code == 401
     assert "members" not in (await admin.get("/admin/backup-status")).json()  # the tree admins' view never gained the whole-database number
+
+
+async def test_the_heartbeat_is_written_even_when_no_family_needs_a_reminder(world, make_client):
+    """Every family paused (or none with an active account): the worker is still alive and must say so."""
+    await world["session"].execute(text("UPDATE trees SET status = 'paused'"))
+    await world["session"].commit()
+    await send_due_reminders(world["session"])
+    root = await signed_in(make_client, "root")
+    assert (await health(root))["worker"]["state"] == "ok"
