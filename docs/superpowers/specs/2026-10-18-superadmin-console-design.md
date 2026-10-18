@@ -66,11 +66,10 @@ Address space `/he-thong` (home) and `/he-thong/<area>`; the current list/create
 Computed by `GET /platform/overview`; zero-count items are left out; "Không có việc nào cần làm" when empty.
 
 1. N họ **không có quản trị viên đang hoạt động** (e.g. the only admin was disabled) → Các họ filtered.
-2. N họ có **admin chưa từng đăng nhập** sau hơn 7 ngày từ lúc tạo → Các họ.
-3. N họ **đang tạm ngưng** (standing reminder, so a pause is not forgotten) → Các họ.
-4. **Bộ nhắc việc (worker) không chạy** (no heartbeat for over 3 hours while it should run hourly) → Hệ thống.
-5. **Chưa sao lưu / sao lưu cũ hơn 7 ngày** (the full-status version of the admins' item) → Hệ thống.
-6. **Ổ đĩa còn dưới 15%** → Hệ thống.
+2. N họ **đang tạm ngưng** (standing reminder, so a pause is not forgotten) → Các họ.
+3. **Bộ nhắc việc (worker) không chạy** (a heartbeat exists but is older than 3 hours; it should run hourly) → Hệ thống.
+4. **Chưa sao lưu / sao lưu cũ hơn 7 ngày** (the full-status version of the admins' item) → Hệ thống.
+5. **Ổ đĩa còn dưới 15%** → Hệ thống.
 
 Platform numbers on the home: number of families (active/paused), total people, total accounts, upload storage.
 
@@ -78,7 +77,7 @@ Platform numbers on the home: number of families (active/paused), total people, 
 
 ### Phase 1 — Frame, overview, platform log foundation
 Route group `/he-thong/*` with a shared frame (same guard, "← Các họ nền tảng", desktop section list); move the current panel into `/he-thong/ho` unchanged;
-`GET /platform/overview` (to-do items 1–3 and the numbers); new table **`platform_events`** (`id`, `actor_id` SET NULL, `actor_name`, `action`, `tree_id` plain int
+`GET /platform/overview` (to-do items 1–2 and the numbers); new table **`platform_events`** (`id`, `actor_id` SET NULL, `actor_name`, `action`, `tree_id` plain int
 (no FK, survives deletion), `tree_name`, `details` JSON, `created_at`) and `app/core/platform_log.py::record`; tree create and rename (existing endpoints) start writing
 `tree.create` / `tree.update`. `trees.last_activity` is **computed** (latest of the tree's audit log / users' last login), not stored.
 
@@ -99,7 +98,7 @@ exactly like a disabled account), guests/signup of that tree are refused, public
 ### Phase 5 — System health
 `GET /platform/health`: database reachable and `alembic_version`; reminder worker last run (new table **`system_state(key, value, updated_at)`**, written by `app/jobs/reminders.py` after each pass as `reminders.last_run`);
 SMTP configured (host set, nothing else revealed); `shutil.disk_usage` of `UPLOAD_DIR`; upload storage (sum of `media.size` per tree plus avatar files, cached per request); and **full backup status**
-(`app/core/backup_status.py` extended with `members` from `MANIFEST.txt` when readable, list of the latest 5 backups with size/age). Overview items 4–6 come from it. Read-only.
+(`app/core/backup_status.py` extended with `members` from `MANIFEST.txt` when readable, list of the latest 5 backups with size/age). Overview items 3–5 come from it. Read-only.
 
 ### Phase 6 — Polish
 Contrast/targets/keyboard pass on the four themes at 375/768/1024/1440, copy review, docs (`CLAUDE.md` of both repos, `DOCKER.md`, `docs/SAO-LUU.md`, the feature note), the superadmin runbook ("ai vào được gì, quên mật khẩu superadmin thì làm gì") in `DOCKER.md`.
