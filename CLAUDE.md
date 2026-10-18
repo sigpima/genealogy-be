@@ -473,4 +473,8 @@ inclusive). Settings changes are audited (`settings.update`, only when something
 and exactly one `security.locked` when the limit is hit; unknown emails, superadmins and attempts the limiter refuses write nothing; with `RATE_LIMIT_ENABLED=false` every failure writes a row (no counter to cap them). The overview's `locked_accounts` item counts
 `security.locked` rows of the last 24 h. `GET /admin/shares` = calendar link state + number of open invitation cards; `GET /cards?open=true` lists the open cards of the tree.
 
+**Data health (admin console phase 4)** — `GET /admin/data-health` (`app/core/data_health.py`): `check_layout(TreeLayout)` (pure) flags `death_before_birth`, `child_before_parent`, `parent_age_gap` (< 12 or > 70), `duplicate_name_year` (folded name + birth year, per member), and
+`ancestor_gap_undated` (info: no birth year above a dated descendant; a tree with no dates is silent); `check_media(db, tree_id, upload_dir)` flags `media_file_missing` and `media_orphan` (info). Read-only: nothing is fixed. The overview's `data_issues` counts warnings only.
+Tests that insert `Member`/`Media` rows through the ORM must import `app.models.place` and `app.models.article` (metadata registration gotcha).
+
 `GET /health` (public, no DB access) is the container healthcheck target.
