@@ -484,4 +484,8 @@ Tests that insert `Member`/`Media` rows through the ORM must import `app.models.
 **Bootstrap code (first superadmin)** — the first registration while `users` is empty becomes the superadmin; when `BOOTSTRAP_CODE` is set it must carry the same `bootstrap_code` (constant-time compare; a refusal is 403 and writes nothing, no tree, no user), so a stranger cannot claim a freshly deployed site.
 Unset = open (dev). `GET /auth/bootstrap` (public) → `{first_user, needs_code}` (never the code); the web signup page uses it, because on a fresh install there is no tree and `/site/info` answers 404.
 
+**Superadmin console (design: `docs/superpowers/specs/2026-10-18-superadmin-console-design.md`, plan: `docs/superpowers/plans/2026-10-18-superadmin-console.md`)** — `/platform/*` (`app/routers/platform.py`, router-level `require_superadmin`, independent of the acting tree).
+`GET /platform/overview` (`app/core/platform_overview.py`): to-do items (`trees_without_admin`, …) + `numbers {trees, trees_paused, members, users (families' accounts only), media_bytes}`. **`platform_events`** (`app/models/platform_event.py`, `app/core/platform_log.py::record`) is the superadmin's own log: no FK on `tree_id` (a deleted family's entries survive), never tree-admin readable,
+never a password/token in `details`. `tree.create` is committed after `create_tree`/`create_user` (they commit on their own). `TreeRead.last_activity` = latest of the tree's audit entries and its users' last logins (computed, not stored).
+
 `GET /health` (public, no DB access) is the container healthcheck target.
