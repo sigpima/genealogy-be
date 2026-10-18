@@ -71,3 +71,9 @@ class TreeCreated(BaseModel):
     tree: TreeRead
     admin: TreeAdmin
     admin_password: str | None = None
+
+
+class TreeDelete(BaseModel):
+    """Deleting a family means typing its slug again."""
+
+    slug: str

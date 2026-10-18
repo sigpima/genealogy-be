@@ -19,7 +19,8 @@ from app.models.audit_log import AuditLog
 from app.models.member import Member
 from app.models.tree import Tree
 from app.models.user import User
-from app.schemas.tree import TreeAdmin, TreeCreate, TreeCreated, TreeRead, TreeUpdate
+from app.core.tree_removal import delete_tree_data
+from app.schemas.tree import TreeAdmin, TreeCreate, TreeCreated, TreeDelete, TreeRead, TreeUpdate
 
 router = APIRouter(prefix="/trees", tags=["trees"], dependencies=[Depends(require_superadmin)])
 
@@ -163,3 +164,22 @@ async def resume_family(
     tree_id: int, request: Request, actor: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)
 ) -> TreeRead:
     return await _set_status(tree_id, "active", actor, request, db)
+
+
+@router.delete("/{tree_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_family(
+    tree_id: int, payload: TreeDelete, actor: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)
+) -> None:
+    """Delete a PAUSED family for good: every row of it and its files. The slug in the body must match."""
+    tree = await db.get(Tree, tree_id)
+    if tree is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="tree not found")
+    if tree.status != "paused":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="pause the family before deleting it")
+    if payload.slug != tree.slug:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="the slug does not match")
+    name, slug = tree.name, tree.slug
+    removal = await delete_tree_data(db, tree)
+    platform_log.record(db, actor=actor, action="tree.delete", tree_id=tree_id, tree_name=name, details={"slug": slug, **removal.counts})
+    await db.commit()
+    removal.unlink()  # only after the commit succeeded
