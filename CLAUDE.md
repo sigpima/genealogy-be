@@ -492,4 +492,8 @@ never a password/token in `details`. `tree.create` is committed after `create_tr
 `public_tree`/`read_access` (guests, signup, avatars/media for guests) 404/false, `_resolve` in `invitations.py` (public cards + personal links) and the `.ics` feed 404, `send_due_reminders` skips it. The superadmin still resolves and acts on it. **A new place that resolves a tree for someone who is not signed in must call `is_paused`.**
 `DELETE /trees/{id}` (body `{slug}`) only for a paused tree: `app/core/tree_removal.py::delete_tree_data` deletes the rows in FK-safe order and returns the files; the router unlinks them **after the commit**; the `tree.delete` event keeps name, slug and counts. `platform_events` rows for a deleted family stay (that is the point of the table).
 
+**Admins of a family (superadmin console phase 3)** — `GET /trees/{id}/admins`, `POST /trees/{id}/admins` (`{email, full_name, password?}` creates an active admin — 409 if the email exists anywhere; or `{user_id}` promotes one of the family's own users to an **active** admin whatever their status), `PATCH /trees/{id}/admins/{user_id}` (`{status}`; the last active admin cannot be disabled, 409),
+`POST /trees/{id}/admins/{user_id}/password` (generated or typed, returned once). Only admins of THAT family are addressable (member, other family's user, superadmin, unknown id = the same 404). All write `platform_events` (`admin.create|promote|update|password_reset`, email only, never a password) and work on a paused family.
+`manage.py set-password --email E [--password P]` is the way back in for a forgotten superadmin password (prints a generated one once).
+
 `GET /health` (public, no DB access) is the container healthcheck target.
