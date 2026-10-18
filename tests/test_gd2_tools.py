@@ -113,7 +113,9 @@ async def test_table_is_admin_only_and_tree_scoped(admin, guest):
 async def test_completeness_counts_members_only(admin):
     await family(admin)
     body = (await admin.get("/members/completeness")).json()
-    assert body == {"total": 4, "with_gender": 2, "with_birth_year": 1, "with_hometown": 0, "basic": 1}
+    assert body == {
+        "total": 4, "with_gender": 2, "with_birth_year": 1, "with_hometown": 0, "basic": 1, "with_death_year": 0, "with_avatar": 0,
+    }
 
 
 # ------------------------------------------------------------------ split
