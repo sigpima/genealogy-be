@@ -4,6 +4,7 @@ and for granting `superadmin`, which the web UI deliberately cannot do).
     uv run python scripts/manage.py create-tree --name "Nguyễn Tộc" --slug nguyen-toc
     uv run python scripts/manage.py create-user --email a@x.com --name "A" --role admin --tree nguyen-toc
     uv run python scripts/manage.py set-role --email a@x.com --role superadmin
+    uv run python scripts/manage.py set-password --email a@x.com        # generates and prints one
     uv run python scripts/manage.py list
 """
 
@@ -14,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.roles import ROLES
+from app.core.security import hash_password
 from app.core.tenants import (
     TenantError,
     create_tree,
@@ -56,6 +58,10 @@ def _build_parser() -> argparse.ArgumentParser:
     role.add_argument("--role", required=True, choices=ROLES)
     role.add_argument("--tree", help="tree slug (required unless the role is superadmin)")
 
+    pw = sub.add_parser("set-password", help="set a user's password (the way back in for a forgotten superadmin password)")
+    pw.add_argument("--email", required=True)
+    pw.add_argument("--password", help="omit to generate one (it is then printed once)")
+
     sub.add_parser("list", help="list trees and users")
     return parser
 
@@ -93,6 +99,18 @@ async def run(argv: list[str], db: AsyncSession) -> str:
             tree = await _tree_arg(db, args.tree)
             user = await set_user_role(db, args.email, args.role, tree)
             return f"{user.email} is now {user.role}" + (f" of tree {tree.slug}" if tree else " (platform level)")
+        if args.command == "set-password":
+            user = (await db.execute(select(User).where(User.email == args.email))).scalar_one_or_none()
+            if user is None:
+                raise TenantError(f"no user with email {args.email!r}")
+            if args.password is not None and len(args.password) < 8:
+                raise TenantError("password must be at least 8 characters")
+            password = args.password or secrets.token_urlsafe(12)
+            user.hashed_password = hash_password(password)
+            await db.commit()
+            if args.password:
+                return f"password of {user.email} changed"
+            return f"password of {user.email} changed\npassword: {password}"
         trees = (await db.execute(select(Tree).order_by(Tree.id))).scalars().all()
         users = (await db.execute(select(User).order_by(User.id))).scalars().all()
         slug_of = {t.id: t.slug for t in trees}

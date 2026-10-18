@@ -20,7 +20,21 @@ from app.models.member import Member
 from app.models.tree import Tree
 from app.models.user import User
 from app.core.tree_removal import delete_tree_data
-from app.schemas.tree import TreeAdmin, TreeCreate, TreeCreated, TreeDelete, TreeRead, TreeUpdate
+from app.core.security import hash_password
+from app.schemas.tree import (
+    AdminAdd,
+    AdminStatusIn,
+    PasswordIn,
+    PasswordOut,
+    TreeAdmin,
+    TreeAdminCreated,
+    TreeAdminRead,
+    TreeCreate,
+    TreeCreated,
+    TreeDelete,
+    TreeRead,
+    TreeUpdate,
+)
 
 router = APIRouter(prefix="/trees", tags=["trees"], dependencies=[Depends(require_superadmin)])
 
@@ -183,3 +197,92 @@ async def delete_family(
     platform_log.record(db, actor=actor, action="tree.delete", tree_id=tree_id, tree_name=name, details={"slug": slug, **removal.counts})
     await db.commit()
     removal.unlink()  # only after the commit succeeded
+
+
+# --------------------------------------------------------------------------- the admins of a family
+
+
+def _admin_read(user: User) -> TreeAdminRead:
+    return TreeAdminRead(id=user.id, email=user.email, full_name=user.full_name, status=user.status, last_login_at=user.last_login_at)
+
+
+async def _tree_or_404(db: AsyncSession, tree_id: int) -> Tree:
+    tree = await db.get(Tree, tree_id)
+    if tree is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="tree not found")
+    return tree
+
+
+async def _admin_of(db: AsyncSession, tree: Tree, user_id: int) -> User:
+    """An admin of THIS family; a member, another family's user, a superadmin or an unknown id is the same 404."""
+    user = await db.get(User, user_id)
+    if user is None or user.tree_id != tree.id or user.role != ROLE_ADMIN:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="admin not found")
+    return user
+
+
+@router.get("/{tree_id}/admins", response_model=list[TreeAdminRead])
+async def list_family_admins(tree_id: int, db: AsyncSession = Depends(get_db)) -> list[TreeAdminRead]:
+    tree = await _tree_or_404(db, tree_id)
+    rows = (await db.execute(select(User).where(User.tree_id == tree.id, User.role == ROLE_ADMIN).order_by(User.id))).scalars().all()
+    return [_admin_read(u) for u in rows]
+
+
+@router.post("/{tree_id}/admins", response_model=TreeAdminCreated, status_code=status.HTTP_201_CREATED)
+async def add_family_admin(
+    tree_id: int, payload: AdminAdd, actor: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)
+) -> TreeAdminCreated:
+    """Create a new admin (409 if the email is used anywhere) or promote one of the family's own users (any status: the result is an active admin)."""
+    tree = await _tree_or_404(db, tree_id)
+    if payload.user_id is not None:
+        user = await db.get(User, payload.user_id)
+        if user is None or user.tree_id != tree.id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
+        before = {"role": user.role, "status": user.status}
+        user.role, user.status = ROLE_ADMIN, STATUS_ACTIVE
+        platform_log.record(db, actor=actor, action="admin.promote", tree=tree, details={"email": user.email, "changes": audit.diff_values(before, {"role": user.role, "status": user.status})})
+        await db.commit()
+        return TreeAdminCreated(admin=_admin_read(user))
+    password = payload.password or secrets.token_urlsafe(12)
+    try:
+        user = await create_user(db, email=payload.email, full_name=payload.full_name, password=password, role=ROLE_ADMIN, tree=tree, status=STATUS_ACTIVE)
+    except TenantError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
+    platform_log.record(db, actor=actor, action="admin.create", tree=tree, details={"email": user.email})
+    await db.commit()
+    return TreeAdminCreated(admin=_admin_read(user), password=None if payload.password else password)
+
+
+@router.patch("/{tree_id}/admins/{user_id}", response_model=TreeAdminRead)
+async def update_family_admin(
+    tree_id: int, user_id: int, payload: AdminStatusIn, actor: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)
+) -> TreeAdminRead:
+    tree = await _tree_or_404(db, tree_id)
+    user = await _admin_of(db, tree, user_id)
+    if payload.status == "disabled" and user.status == STATUS_ACTIVE:
+        others = (
+            await db.execute(
+                select(func.count()).select_from(User).where(User.tree_id == tree.id, User.role == ROLE_ADMIN, User.status == STATUS_ACTIVE, User.id != user.id)
+            )
+        ).scalar_one()
+        if others == 0:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="there must always be at least one active admin")
+    if user.status != payload.status:
+        platform_log.record(db, actor=actor, action="admin.update", tree=tree, details={"email": user.email, "changes": {"status": [user.status, payload.status]}})
+        user.status = payload.status
+        await db.commit()
+    return _admin_read(user)
+
+
+@router.post("/{tree_id}/admins/{user_id}/password", response_model=PasswordOut)
+async def reset_family_admin_password(
+    tree_id: int, user_id: int, payload: PasswordIn, actor: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)
+) -> PasswordOut:
+    """A new password for a family's admin, returned ONCE; never written to the platform log."""
+    tree = await _tree_or_404(db, tree_id)
+    user = await _admin_of(db, tree, user_id)
+    password = payload.password or secrets.token_urlsafe(9)
+    user.hashed_password = hash_password(password)
+    platform_log.record(db, actor=actor, action="admin.password_reset", tree=tree, details={"email": user.email})
+    await db.commit()
+    return PasswordOut(password=password)

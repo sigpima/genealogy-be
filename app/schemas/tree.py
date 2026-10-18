@@ -1,6 +1,8 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from typing import Literal
+
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from app.core.tenants import SLUG_PATTERN
 
@@ -77,3 +79,42 @@ class TreeDelete(BaseModel):
     """Deleting a family means typing its slug again."""
 
     slug: str
+
+
+class TreeAdminRead(TreeAdmin):
+    last_login_at: datetime | None = None
+
+
+class AdminAdd(BaseModel):
+    """Either a brand-new admin (`email` + `full_name`, password optional) or `user_id` of one of the family's own users to promote."""
+
+    user_id: int | None = None
+    email: EmailStr | None = None
+    full_name: str | None = Field(default=None, min_length=1)
+    password: str | None = Field(default=None, min_length=8)
+
+    @model_validator(mode="after")
+    def _one_way_or_the_other(self) -> "AdminAdd":
+        creating = self.email is not None or self.full_name is not None
+        if (self.user_id is None) == (not creating):
+            raise ValueError("give either user_id or email + full_name")
+        if creating and (self.email is None or self.full_name is None):
+            raise ValueError("a new admin needs email and full_name")
+        return self
+
+
+class TreeAdminCreated(BaseModel):
+    admin: TreeAdminRead
+    password: str | None = None
+
+
+class AdminStatusIn(BaseModel):
+    status: Literal["active", "disabled"]
+
+
+class PasswordIn(BaseModel):
+    password: str | None = Field(default=None, min_length=8)
+
+
+class PasswordOut(BaseModel):
+    password: str
