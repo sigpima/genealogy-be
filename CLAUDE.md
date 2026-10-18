@@ -462,4 +462,10 @@ overwrites `X-Forwarded-For` the "address" is the web container for everybody an
 (`app/core/admin_overview.py::compute_overview`) is the admin home's "Cần làm" list: items `{key,count,text,href,kind task|notice}` with zero-count tasks left out; later phases
 append items to the same function. Every admin endpoint is tree-scoped through `get_write_context`.
 
+**Admin users (admin console phase 2)** — `users.last_login_at` (set on every successful login; NULL for accounts that never logged in *since the column existed*, so the UI says "Chưa ghi nhận")
+and `users.member_id` (optional display link to a person of the same tree, unique, `ON DELETE SET NULL`). `GET /admin/users?q=&status=&role=` (q folded over name + email),
+`POST /admin/users/approve {ids}` (only this tree's `pending` users; anything else is silently skipped), `POST /admin/users/{id}/password` (admin sets or generates a password, returned **once**,
+never audited/logged; superadmins and other trees' users are 404), `PATCH /admin/users/{id}` also takes `member_id` (`model_fields_set`: omitted = unchanged, `null` = unlink; other tree's person 404, already-linked person 409).
+All of them write `audit_log` (`user.create|update|approve|password_reset`). **`TRUNCATE members … CASCADE` now also empties `users`** (FK) — test/smoke resets must keep a copy of the users they need.
+
 `GET /health` (public, no DB access) is the container healthcheck target.
