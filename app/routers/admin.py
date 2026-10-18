@@ -3,6 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import audit
+from app.core.admin_overview import compute_overview
 from app.core.permissions import get_write_context
 from app.core.privacy import KEY_PREFIX, field_levels
 from app.core.roles import ROLE_ADMIN, STATUS_ACTIVE, get_tree_settings
@@ -11,6 +12,7 @@ from app.core.tenancy import TreeContext
 from app.db.session import get_db
 from app.models.site_setting import SiteSetting
 from app.models.user import User
+from app.schemas.admin_overview import Overview
 from app.schemas.admin import AdminUserCreate, AdminUserUpdate, PrivacyPayload, PrivacyRead, SiteSettingsPayload
 from app.schemas.user import UserRead
 
@@ -151,3 +153,9 @@ async def update_privacy(
         audit.record(db, tree_id=ctx.tree.id, actor=ctx.user, action="privacy.update", changes=changes)
     await db.commit()
     return PrivacyRead(fields=await field_levels(db, ctx.tree.id))
+
+
+@router.get("/overview", response_model=Overview)
+async def overview(ctx: TreeContext = Depends(get_write_context), db: AsyncSession = Depends(get_db)) -> Overview:
+    """What is waiting for this tree's admin (the "Cần làm" box of the admin home)."""
+    return await compute_overview(db, ctx.tree, await get_tree_settings(db, ctx.tree.id))
