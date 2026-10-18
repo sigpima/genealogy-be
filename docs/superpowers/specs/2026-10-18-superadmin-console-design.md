@@ -9,7 +9,7 @@ It reuses the admin console's layout and conventions (`2026-10-18-admin-console-
 
 The superadmin is the platform owner: usually one person (or two) running a server that hosts several families' trees. Today `/he-thong`
 is a list of families with "create", "rename" and "go in". It cannot say whether anything needs attention, cannot stop or remove a
-family, cannot manage a family's admins, leaves no record of what the superadmin did inside other people's families, and says nothing
+family, cannot manage a family's admins, leaves no record of what the superadmin did to the families (create, pause, delete, admin changes, going in), and says nothing
 about whether the server itself is healthy. The page should let one person **look after the whole server safely**: see what needs
 attention, handle the life of a family (create, pause, remove), keep each family's admin able to get in, and trust that the platform is
 healthy and backed up.
@@ -20,7 +20,7 @@ healthy and backed up.
 - A family can be **paused** (nobody of it can sign in or use it, nothing is lost) and **resumed**; a paused family can be **deleted for good**
   behind a deliberate confirmation.
 - Each family's admins can be **listed, added, re-enabled and given a new password** by the superadmin (admin of last resort).
-- Everything the superadmin does to a family — including **going in to help** — is written to a platform log the superadmin can read.
+- Everything the superadmin does **to a family from this console** — and **going in to help** — is written to a platform log the superadmin can read. (What the superadmin then does *inside* a family is already in that family's own audit log with the superadmin as the actor.)
 - The superadmin can see **server health**: database and migration version, the reminder worker's last run, e-mail configured or not, disk and
   storage use, and the **full** backup status (the whole-database numbers a tree admin must not see).
 
@@ -112,7 +112,12 @@ Contrast/targets/keyboard pass on the four themes at 375/768/1024/1440, copy rev
 3. **Pause blocks everyone of the family** including its admin, and kills sessions at once, so a pause is a real stop.
 4. **Platform log is its own table**, not the families' audit log, because tree-less events (a deleted family) have nowhere to live there and tree admins must never see them.
 5. **`last_activity` is computed**, no new write on every request.
-6. **Superadmin accounts** are never created/changed here; `set-role superadmin` and the bootstrap code remain the only ways.
+6. **Superadmin accounts** are never created/changed on the web; `set-role superadmin` and the bootstrap code remain the only ways to *make* one. A forgotten superadmin password gets a new command `manage.py set-password --email …` (generates and prints one, or reads `--password`), built in Phase 3 and described in the Phase 6 runbook.
+7. **"Going in" is logged by the console, not enforced by the server.** `support.enter` is written when the web calls `POST /trees/{id}/support` (the "Vào cây" button and the tree switcher both do). A superadmin who sends `X-Tree-Id` by hand is not caught; their writes inside any family still appear in that family's audit log under their name. Mirroring every in-family write into the platform log would hook every route and is not worth it.
+8. **Delete has no backup precondition.** Safety = paused first + typing the slug + a dialog that shows what will go (people, accounts, files) and says it cannot be undone, with a link to the family's JSON export (`/export/data.json` while acting on it). It does not check for a recent backup (Phase 5 ships later and a backup says nothing about this family).
+9. **Item "admin never logged in" is dropped from this release**: `last_login_at` is NULL for every account older than that column, so it would flood the home on day one. Items 1 and 3 already cover "no way in". Paused families are excluded from item 1 (their admins are irrelevant until resumed) and counted only by item 3.
+10. **Worker heartbeat with no row yet** (fresh install or a setup without the worker) shows "chưa có dữ liệu" on the Hệ thống page and is **not** a to-do item; the item fires only when a heartbeat exists and is older than 3 hours.
+11. **Adding an admin**: `users.email` is unique across the platform, so creating an admin with an email that already exists anywhere is 409 "email đã được dùng" (the caller is the superadmin, so nothing is leaked). Promoting is done by choosing one of **the family's own users** (by id): it sets role `admin` and status `active`, including for a pending or disabled user. Superadmins are never addressable.
 
 ## Left to the builder
 
