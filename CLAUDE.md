@@ -38,7 +38,7 @@ healthcheck hits `GET /health`.
 
 ## Architecture
 
-Async FastAPI backend for a genealogy app: auth (register/login/me/logout)
+Async FastAPI backend for a genealogy app: auth (login/me/logout, forgot/reset password; no public sign-up)
 plus a `Member` CRUD API. One deployment hosts **many families**: every member
 belongs to a tree (`members.tree_id`), every user to one tree (or none, for the
 superadmin), and every `/members/*` route acts on exactly one tree — see the
@@ -337,23 +337,23 @@ so don't bump `bcrypt` alone without also moving off passlib.
 **Multi-family trees, roles and account status (designs: `docs/superpowers/specs/2026-10-17-roles-and-admin-design.md`
 and `...-multi-tree-design.md`)** — one deployment hosts many families. `trees(id, name, slug)`;
 `members.tree_id` is NOT NULL; `users.tree_id` is NULL **only for superadmins**; `site_settings` is per
-tree (PK `(tree_id, key)`: `visibility` private/public, `registration` open/approval/closed). Roles:
+tree (PK `(tree_id, key)`: `visibility` private/public; the old `registration` setting is gone). Roles:
 `superadmin` (platform owner, no tree, acts in any tree), `admin` (one tree), `member` (reads one
 tree); statuses `pending` | `active` | `disabled`. Constants and setting defaults: `app/core/roles.py`.
 **Which tree a request acts on** (`app/core/tenancy.py`): a signed-in user → their own `tree_id`
 (nothing the client sends can change that); a superadmin → `X-Tree-Id` header, else the `acting_tree` cookie (set by the web
 tree switcher; garbage or an unknown id is ignored, while a wrong *header* is a 404), else the lowest-id
-tree; a guest / signup → the `tree_slug` cookie (set by the web app's `/t/<slug>` route), else the
+tree; a guest → the `tree_slug` cookie (set by the web app's `/t/<slug>` route), else the
 only tree if there is exactly one. **Cross-tree ids always answer 404 (never 403), for reads and
 writes alike** — keep it that way (`_member_in_tree` in `app/routers/member.py`; the admin router's
 `_user_in_tree`). Every member route takes `get_read_context` (an active user, or a guest on a
 public tree; guests with no resolvable tree get a plain 401 so the web app sends them to /login) or
 `get_write_context` (admin/superadmin) from `app/core/permissions.py`; a new write route that
 forgets the latter would be open to members, and `tests/test_multi_tree.py` /
-`tests/test_roles_admin.py::test_members_can_read_but_not_write` are where to add it. **Bootstrap:**
-the first registration while `users` is empty becomes the tree-less *superadmin* and a default tree
-is created if none exists; everybody else joins the resolved tree as a `member` under *that tree's*
-registration mode (400 when several trees exist and no cookie says which; 403 when closed).
+`tests/test_roles_admin.py::test_members_can_read_but_not_write` are where to add it. **Accounts have no public door** (feedback batch, phase 4): the first superadmin is made from the command line
+(`scripts/manage.py create-user --role superadmin`, creates no tree), the superadmin makes a family with its first admin, and an admin
+makes accounts or **invitation links** (below). `POST /auth/register`, `GET /auth/bootstrap`, `BOOTSTRAP_CODE`, the `registration` setting and `POST /admin/users/approve` no longer exist;
+a stale `registration` key in a settings PUT is ignored. Old `pending` accounts can still be approved one by one (`PATCH /admin/users/{id}` `status`). Tests build users with `tests/test_roles_auth.py::make_user`.
 `login` answers 403 `account_pending` / `account_disabled`, and `get_current_user` re-checks `status`
 on every request, so disabling an account kills its token at once. Guests get a **redacted**
 `MemberDetail` (no `notes`, `residence`, `burial_*`, `phone`, `email`). **Avatar files follow the same rule**
@@ -452,7 +452,7 @@ non-admins must go through `privacy_for` — do not re-implement "guests get les
 `chú/cô` younger, cousins ordered by **branch order not age**, `ông/cụ/kỵ`, `chắt/chút`), spouses through their partner with the usual terms (thím, chị dâu, dượng...). Maternal
 relatives and in-law terms beyond a short table are out of scope — the mother is a spouse, not a parent, so `cậu/dì` cannot be derived.
 
-**Operations (GĐ11)** — `app/core/rate_limit.py` (in-memory sliding windows, per process): login 20/5 min per address + **8 failures/5 min per account**, register 10/h, forgot-password 5/h,
+**Operations (GĐ11)** — `app/core/rate_limit.py` (in-memory sliding windows, per process): login 20/5 min per address + **8 failures/5 min per account**, invitation links 30/5 min, forgot-password 5/h,
 public RSVP 40/10 min; 429 + `Retry-After`. **Measured:** Next.js's `/api` proxy does not forward the visitor's address, so unless `TRUSTED_PROXY_HOPS` says a real reverse proxy
 overwrites `X-Forwarded-For` the "address" is the web container for everybody and the per-address limits are loosened ×5 (`SHARED_ADDRESS_FACTOR`). Tests switch the limiter off in
 `conftest.py` (`limiter.enabled`) — turn it on with the `on` fixture in `tests/test_rate_limit.py`. Security headers come from a middleware in `app/main.py`. `GET /export/data.json` (admin, audited
@@ -481,8 +481,7 @@ Tests that insert `Member`/`Media` rows through the ORM must import `app.models.
 `{state never|ok|old (≥ 7 days), last_at, age_days, size_bytes, kept}` for the newest `gia-pha-YYYYmmdd-HHMMSS/` folder that has `database.dump` (read as Vietnam time). **Deliberately no download, no trigger and no member count**: a backup holds every family's data. Overview item
 `backup_old` appears for `never`/`old`. `tests/conftest.py` points `BACKUP_DIR` at a fresh-looking backup so unrelated tests are not nagged. Create `./backups` yourself before `docker compose up` (Docker would create it root-owned and `scripts/backup.sh` could not write).
 
-**Bootstrap code (first superadmin)** — the first registration while `users` is empty becomes the superadmin; when `BOOTSTRAP_CODE` is set it must carry the same `bootstrap_code` (constant-time compare; a refusal is 403 and writes nothing, no tree, no user), so a stranger cannot claim a freshly deployed site.
-Unset = open (dev). `GET /auth/bootstrap` (public) → `{first_user, needs_code}` (never the code); the web signup page uses it, because on a fresh install there is no tree and `/site/info` answers 404.
+**Invitation links (feedback batch, phase 4)** — table `member_invites` (migration `f8c0d4e72b93`; named so because `invitations` already means RSVP cards): `token_hash` (SHA-256; the raw token is shown once, like a reset link), `expires_at` (14 days), `used_at`/`used_by`, `revoked_at`, a **partial unique index = one open invitation per person**. Admin side (`app/routers/member_invites.py`, audited `invite.create|revoke`, kind "people"): `POST /members/{id}/invitation` → `{id, path:"/moi/<token>", expires_at}` (a new one revokes the old; 409 if the person already has an account; 404 for another tree), `GET /admin/invitations` (status pending/used/expired/revoked, who used it), `DELETE /invitations/{id}`. Public side (`app/routers/invite_public.py`, prefix `/invite`, rate-limited per address): `GET /invite/{token}` → `{family, person, expires_at}`; `POST /invite/{token}/accept` `{email, password≥8, full_name?}` claims the link with one atomic `UPDATE … RETURNING` (two people racing → one 201, one 404), creates an **active member** linked via `users.member_id`, signs in (`set_login_cookie`), audits `invite.accept`. Every unusable link (unknown, used, revoked, expired, paused family) is the same 404. `GET /auth/me` now has `member: {id, name} | null`. An admin links *themself* with `PATCH /admin/users/{own id}` `{member_id}` (audited as `user.update`; no approval — the link is display-only).
 
 **Superadmin console (design: `docs/superpowers/specs/2026-10-18-superadmin-console-design.md`, plan: `docs/superpowers/plans/2026-10-18-superadmin-console.md`)** — `/platform/*` (`app/routers/platform.py`, router-level `require_superadmin`, independent of the acting tree).
 `GET /platform/overview` (`app/core/platform_overview.py`): to-do items (`trees_without_admin`, …) + `numbers {trees, trees_paused, members, users (families' accounts only), media_bytes}`. **`platform_events`** (`app/models/platform_event.py`, `app/core/platform_log.py::record`) is the superadmin's own log: no FK on `tree_id` (a deleted family's entries survive), never tree-admin readable,
