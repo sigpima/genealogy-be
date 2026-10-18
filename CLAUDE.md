@@ -468,4 +468,9 @@ and `users.member_id` (optional display link to a person of the same tree, uniqu
 never audited/logged; superadmins and other trees' users are 404), `PATCH /admin/users/{id}` also takes `member_id` (`model_fields_set`: omitted = unchanged, `null` = unlink; other tree's person 404, already-linked person 409).
 All of them write `audit_log` (`user.create|update|approve|password_reset`). **`TRUNCATE members … CASCADE` now also empties `users`** (FK) — test/smoke resets must keep a copy of the users they need.
 
+**Audit kinds, security events, shares (admin console phase 3)** — `GET /audit?kind=data|people|security|settings&since=&until=` (`app/core/audit_kinds.py`: every action prefix belongs to exactly one kind; **dates are whole days in Vietnam time**,
+inclusive). Settings changes are audited (`settings.update`, only when something changed). **Security events** (`app/core/security_events.py`): a wrong password for an existing tree account writes `security.login_failed` (up to the 8-failure limit)
+and exactly one `security.locked` when the limit is hit; unknown emails, superadmins and attempts the limiter refuses write nothing; with `RATE_LIMIT_ENABLED=false` every failure writes a row (no counter to cap them). The overview's `locked_accounts` item counts
+`security.locked` rows of the last 24 h. `GET /admin/shares` = calendar link state + number of open invitation cards; `GET /cards?open=true` lists the open cards of the tree.
+
 `GET /health` (public, no DB access) is the container healthcheck target.
