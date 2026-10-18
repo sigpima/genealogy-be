@@ -458,4 +458,8 @@ overwrites `X-Forwarded-For` the "address" is the web container for everybody an
 `conftest.py` (`limiter.enabled`) — turn it on with the `on` fixture in `tests/test_rate_limit.py`. Security headers come from a middleware in `app/main.py`. `GET /export/data.json` (admin, audited
 `data.export`) dumps the tree's tables **without credentials or tokens** (`SECRET_COLUMNS`). Backups are `scripts/backup.sh` / `scripts/restore.sh` at the repo root (see `docs/SAO-LUU.md`).
 
+**Admin console (design: `docs/superpowers/specs/2026-10-18-admin-console-design.md`, plan: `docs/superpowers/plans/2026-10-18-admin-console.md`)** — `GET /admin/overview`
+(`app/core/admin_overview.py::compute_overview`) is the admin home's "Cần làm" list: items `{key,count,text,href,kind task|notice}` with zero-count tasks left out; later phases
+append items to the same function. Every admin endpoint is tree-scoped through `get_write_context`.
+
 `GET /health` (public, no DB access) is the container healthcheck target.
