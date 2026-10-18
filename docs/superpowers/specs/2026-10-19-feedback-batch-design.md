@@ -12,7 +12,7 @@ Everything not marked **[owner]** is my call.
 |---|---|---|---|
 | 1 | Chronicle editor should not be Markdown; modern, Google-Docs-like toolbar, select text and apply | `ArticleEditor` is a Markdown textarea; articles are stored as Markdown and read by a safe renderer and by the book PDF | **WYSIWYG editor that still stores Markdown** (Phase 3) |
 | 2 | Generation picker on the tree is a row of chips; many generations force scrolling; make it a number input with +/− | `GenerationFilterBar`: one chip per generation, "+N đời" overflow; click = show generations 1..N | **Stepper**: value = deepest generation shown; range 1..youngest (whole tree) or branch-root generation..youngest (branch view) (Phase 1) |
-| 3 | Should a system user and a family member be linked? A user who registers from the family's link sees their tree, right? | Registering through the family link `/t/<slug>` puts the account in that family (waiting for approval, or active at once, per the family's registration mode) and it then sees that family's tree — **yes**. The link to a *person* exists only as a manual, display-only link set by an admin (`users.member_id`) | **Yes, link them, and make it automatic via an invitation link** (Phase 4, needs your OK) |
+| 3 | Should a system user and a family member be linked? A user who registers from the family's link sees their tree, right? | Registering through the family link put the account in that family; the link to a *person* was only a manual, display-only link set by an admin (`users.member_id`) | **Yes — via invitation links, and public sign-up is removed** (Phase 4, decided by the owner) |
 | 4 | Header: name to the left; notifications, sign-out and settings all icons at the far right | Name sits next to the right-hand group; sign-out is text | Redesign (Phase 1) |
 | 5 | "Tư liệu & bút tích": native file input ("Choose file / No file…") and photos piled up, confusing | `MediaGallery` with a bare `<input type=file>` | Redesign upload + gallery (Phase 2) |
 | 6 | Where do I add a spouse? And the founding ancestor can be marked "con nuôi"? | Spouses are added in the profile panel's tab **"Hôn phối & con"** (admins only), easy to miss. The "Con nuôi" checkbox shows for everybody, root included, and the API accepts `is_adopted` with no father | Make "Thêm vợ/chồng" / "Thêm con" visible actions on the panel; hide "Con nuôi" for the root and make the API refuse it (Phase 1) |
@@ -32,7 +32,7 @@ Everything not marked **[owner]** is my call.
 - Tables, colours, fonts or font sizes in chronicles (Markdown cannot hold them; headings, bold, italic, lists, quote, rule, link and photo are enough for a family history).
 - Real-time co-editing, comments or version history of articles.
 - Parsing short Google links (`maps.app.goo.gl/...`) into coordinates (a browser cannot read them across origins; the link is stored and opens in Maps; the map pin appears only when the pasted URL carries coordinates).
-- Changing who can see or edit what (privacy levels, roles) beyond Phase 4's invitation.
+- Changing who can see or edit what (privacy levels, roles) beyond Phase 4's invitation and the removal of public sign-up.
 
 ## Anti-goals (a failure even if it technically works)
 
@@ -83,21 +83,36 @@ New editor component built on **Tiptap** (ProseMirror) with a Markdown serialize
 - The editing page keeps a live "Xem trước" toggle (the real reader view) and the existing draft/published, cover, pinned and "người được nhắc" controls.
 - Dependency note: adds `@tiptap/*` packages and a Markdown serializer to `genealogy-web` (build size noted in the report; the editor is loaded lazily only on the edit pages).
 
-## Phase 4 — invitation link and the user ↔ person link (needs the owner's OK)
+## Phase 4 — invitation links, and no more public sign-up **[owner decided, 19/10]**
 
-**[owner decision]** This is the "invite by link" that the admin console design deferred. Proposed behaviour:
-- In the user's profile panel (admin) and in the Người dùng page: **"Mời người này"** creates a one-time link `/moi/<token>` bound to that person (member of the tree). Optionally an e-mail to put in the greeting; the link works once, expires in 14 days, can be revoked.
-- Opening it shows "Bạn được mời vào gia phả <họ> với tư cách <tên người>"; the relative sets a name/e-mail/password and lands signed in as an **active member linked to that person** (`users.member_id` set automatically, no approval step, never admin).
-- Effects of the link (what "link" buys): the tree opens focused on "tôi"; a "Hồ sơ của tôi" shortcut; the kinship dialog defaults to "tôi" as the first person; the user may *propose* changes to their own profile (already possible for anyone). Display of "Là <tên> trong cây" in the admin's user list stays.
-- Safety: token is secret and one-time; the family's own registration mode is unchanged for people who register without an invitation; a linked person can be linked to one account only (existing unique rule).
-Without this phase the app keeps today's behaviour (register through the family link, admin approves, admin links manually).
+**Decision of the owner:** accounts come from only two doors. The owner creates the first superadmin from the command line; the superadmin creates a family together with its first admin;
+the admin then invites relatives with **a link bound to one person of the tree**. There is no public sign-up. The admin is also a member of the family: after the data is entered the admin links their own
+account to their person **themselves** (no superadmin approval — the link is display-only, grants nothing, and is already in the family's audit log as `user.update`).
+
+**Invitations.** New table `invitations(id, tree_id, member_id → members CASCADE, token_hash (sha256, unique), created_by SET NULL, created_at, expires_at (14 days), used_at, used_by SET NULL, revoked_at)`.
+- Admin (tree-scoped, audited `invite.create|revoke`): `POST /members/{id}/invitation` → `{path: "/moi/<token>", expires_at}` — **the raw token is shown once** (only its hash is stored, like password-reset tokens);
+  a new invitation for the same person revokes the previous one; 409 if the person is already linked to an account; 404 for another tree's person. `GET /admin/invitations` (person, status pending/used/expired/revoked, dates, who used it),
+  `DELETE /invitations/{id}` (revoke).
+- Public (no login; the token is the access control; rate-limited per address): `GET /invite/{token}` → `{family, person, expires_at}` or 404 (unknown/used/expired/revoked, or the family is paused);
+  `POST /invite/{token}/accept` `{email, password, full_name?}` → creates an **active member** account of that tree with `users.member_id` = the invited person, marks the invitation used, signs the person in (cookie). 409 for an e-mail already in use,
+  422 for a short password. The role is always `member`.
+- Web: page `/moi/[token]` (outside the app shell, like the RSVP card): greets "Bạn được mời vào gia phả <họ> với tư cách <tên>", a small form, then lands on the tree focused on that person. Admin side: a **"Mời người này"** action in the
+  person's panel (hidden when the person already has an account) opening a dialog that shows the link once with a copy button (and a select-all fallback for plain HTTP) and the expiry; a **"Lời mời"** section on the Người dùng page lists invitations with "Thu hồi".
+- What the link buys the relative: the account shows "Là <tên> trong cây"; the header name opens **"Hồ sơ của tôi"** (the tree focused on their person); after sign-in the tree opens focused on them once per session; the relationship dialog offers a
+  one-tap **"Xem với tôi"**. `GET /auth/me` gains `member: {id, name} | null` for this.
+- **Admin links themself**: in the person's panel an admin sees **"Đây là tôi"** (PATCH of their own `member_id`, same rule: the person must be in the tree and not linked to another account).
+
+**Removing public sign-up.** Gone: `POST /auth/register`, `GET /auth/bootstrap`, `BOOTSTRAP_CODE`, the `registration` site setting (open/approval/closed) and its UI, `POST /admin/users/approve` + the "Duyệt tất cả" button + the "chờ duyệt" to-do item + the "open registration" notice,
+the register rate limit, the `/signup` page and the Signup links. Kept: login, forgot/reset password, `status` values (single approve/disable on the Người dùng page still works for any old `pending` account), `/t/<slug>` (guests of a public tree and the login context),
+public trees (read-only for guests). **First superadmin on a fresh install:** `docker compose exec api python scripts/manage.py create-user --role superadmin --email … --name …` (documented in `DOCKER.md`); a signed-in superadmin with no family yet is sent to `/he-thong` instead of an error.
+Existing accounts and data are untouched.
 
 ## Order and size
 
 1. Phase 1 (small, mostly frontend + two tiny API changes) — one release.
 2. Phase 2 (frontend redesign + one migration + `map_links`) — one release.
 3. Phase 3 (the editor; the largest, isolated to the chronicles pages) — one release.
-4. Phase 4 only if approved.
+4. Phase 4 (invitations + removal of public sign-up) — one release, decided by the owner.
 Each phase: spec section → tests first → implement → Playwright on the throwaway stack at phone and desktop widths, in the four themes (contrast/target audit as in the admin console) → docs → merge to local `main` → rebuild the user's stack. Nothing is pushed.
 
 ## Left to the builder
