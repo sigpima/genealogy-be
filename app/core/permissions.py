@@ -14,8 +14,9 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.roles import ADMIN_ROLES, ROLE_SUPERADMIN, get_tree_settings
-from app.core.tenancy import TreeContext, public_tree, tree_for_user
+from app.core.tenancy import TreeContext, is_paused, public_tree, tree_for_user
 from app.db.session import get_db
+from app.models.tree import Tree
 from app.models.user import User
 from app.routers.auth import ACCESS_TOKEN_COOKIE, get_current_user, get_token_from_request
 
@@ -82,7 +83,7 @@ async def read_access(request: Request, db: AsyncSession, tree_id: int, *, allow
             user = None
         if user is not None and (user.role == ROLE_SUPERADMIN or user.tree_id == tree_id):
             return True, user
-    if allow_guests and (await get_tree_settings(db, tree_id))["visibility"] == "public":
+    if allow_guests and (await get_tree_settings(db, tree_id))["visibility"] == "public" and not is_paused(await db.get(Tree, tree_id)):
         return True, None
     return False, None
 

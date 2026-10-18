@@ -20,7 +20,7 @@ from app.core.roles import (
     STATUS_PENDING,
     get_tree_settings,
 )
-from app.core.tenancy import public_tree
+from app.core.tenancy import is_paused, public_tree
 from app.core.tenants import get_or_create_default_tree
 from app.core.security import (
     InvalidTokenError,
@@ -152,6 +152,8 @@ async def login(
     if user.status == STATUS_DISABLED:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="account_disabled")
 
+    if user.tree_id is not None and is_paused(await db.get(Tree, user.tree_id)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="tree_paused")
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
     token = create_access_token(subject=user.email)
@@ -191,6 +193,9 @@ async def get_current_user(
     # Checked on every request (not just at login) so disabling an account takes effect at once.
     if user.status != STATUS_ACTIVE:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"account_{user.status}")
+    # a paused family is stopped for its users on the very next request too (like a disabled account)
+    if user.tree_id is not None and is_paused(await db.get(Tree, user.tree_id)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="tree_paused")
     return user
 
 

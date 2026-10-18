@@ -16,6 +16,9 @@ class Tree(Base):
     slug: Mapped[str] = mapped_column(String(60), unique=True, index=True, nullable=False)
     # Secret of the calendar's .ics feed URL (NULL = feed disabled); an admin creates/regenerates/removes it.
     calendar_token: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
+    # "active" | "paused": a paused family is stopped for everybody in it (login, sessions, guests, public links, reminders);
+    # the superadmin can still look at it and act on it. See app/core/tenancy.py::is_paused.
+    status: Mapped[str] = mapped_column(String(10), nullable=False, server_default="active")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

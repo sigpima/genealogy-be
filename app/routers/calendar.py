@@ -14,7 +14,7 @@ from app.core.calendar_items import Item, collect, count_incomplete
 from app.core.ics import build_calendar
 from app.core.lunar import LunarDate, lunar_to_solar, solar_to_lunar
 from app.core.permissions import get_read_context, get_user_context, get_write_context
-from app.core.tenancy import TreeContext
+from app.core.tenancy import TreeContext, is_paused
 from app.db.session import get_db
 from app.models.event import Event
 from app.models.member import Member
@@ -167,7 +167,7 @@ async def feed(filename: str, db: AsyncSession = Depends(get_db)) -> Response:
     if not filename.endswith(".ics") or len(filename) < 10:
         raise not_found
     tree = (await db.execute(select(Tree).where(Tree.calendar_token == filename[: -len(".ics")]))).scalar_one_or_none()
-    if tree is None:
+    if tree is None or is_paused(tree):
         raise not_found
     today = calendar_items.vn_today()
     members, events, places = await load_sources(db, tree.id)

@@ -45,7 +45,7 @@ async def send_due_reminders(db: AsyncSession, today: date | None = None) -> dic
     today = today or calendar_items.vn_today()
     smtp_on = bool(get_settings().smtp_host)
     created = emailed = 0
-    for tree in (await db.execute(select(Tree))).scalars().all():
+    for tree in (await db.execute(select(Tree).where(Tree.status == "active"))).scalars().all():  # a paused family gets nothing
         users = list(
             (await db.execute(select(User).where(User.tree_id == tree.id, User.status == STATUS_ACTIVE).order_by(User.id))).scalars().all()
         )

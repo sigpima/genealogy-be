@@ -33,6 +33,7 @@ class TreeRead(BaseModel):
     member_count: int = 0
     user_count: int = 0
     admins: list[TreeAdmin] = []
+    status: str = "active"
     #: Latest of the family's audit-log entries and its users' last logins; null when nothing has happened yet.
     last_activity: datetime | None = None
     #: The tree this request acts on (the superadmin's current choice).

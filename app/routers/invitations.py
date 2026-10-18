@@ -17,7 +17,7 @@ from app.core.audit import diff_values
 from app.core.lunar import solar_to_lunar
 from app.core.permissions import get_write_context
 from app.core.rate_limit import limit_by_ip
-from app.core.tenancy import TreeContext
+from app.core.tenancy import TreeContext, is_paused
 from app.db.session import get_db
 from app.models.event import Event
 from app.models.event_card import EventCard, EventRsvp
@@ -273,12 +273,13 @@ async def export_responses(card_id: int, db: AsyncSession = Depends(get_db), ctx
 
 async def _resolve(db: AsyncSession, token: str) -> tuple[EventCard, EventRsvp | None]:
     rsvp = (await db.execute(select(EventRsvp).where(EventRsvp.invitee_token == token))).scalar_one_or_none()
-    if rsvp is not None:
-        return await db.get(EventCard, rsvp.card_id), rsvp
-    card = (await db.execute(select(EventCard).where(EventCard.token == token))).scalar_one_or_none()
+    card = await db.get(EventCard, rsvp.card_id) if rsvp is not None else None
     if card is None:
+        card = (await db.execute(select(EventCard).where(EventCard.token == token))).scalar_one_or_none()
+    # an unknown token and a paused family look the same from outside
+    if card is None or is_paused(await db.get(Tree, card.tree_id)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
-    return card, None
+    return card, rsvp if rsvp is not None and rsvp.card_id == card.id else None
 
 
 async def _public(db: AsyncSession, card: EventCard, rsvp: EventRsvp | None) -> PublicCard:

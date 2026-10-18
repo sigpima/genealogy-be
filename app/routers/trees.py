@@ -48,6 +48,7 @@ async def _describe(db: AsyncSession, trees: list[Tree], current_id: int | None)
                     if u.role == ROLE_ADMIN
                 ],
                 is_current=tree.id == current_id,
+                status=tree.status,
                 last_activity=max([t for t in [audited.get(tree.id), *(u.last_login_at for u in own)] if t is not None], default=None),
             )
         )
@@ -129,3 +130,36 @@ async def update_family(
         current_id = None
     [read] = await _describe(db, [tree], current_id)
     return read
+
+
+async def _set_status(tree_id: int, wanted: str, actor: User, request: Request, db: AsyncSession) -> TreeRead:
+    tree = await db.get(Tree, tree_id)
+    if tree is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="tree not found")
+    if tree.status == wanted:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"tree is already {wanted}")
+    tree.status = wanted
+    platform_log.record(db, actor=actor, action="tree.pause" if wanted == "paused" else "tree.resume", tree=tree)
+    await db.commit()
+    await db.refresh(tree)
+    try:
+        current_id = (await tree_for_user(actor, request, db)).id
+    except HTTPException:
+        current_id = None
+    [read] = await _describe(db, [tree], current_id)
+    return read
+
+
+@router.post("/{tree_id}/pause", response_model=TreeRead)
+async def pause_family(
+    tree_id: int, request: Request, actor: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)
+) -> TreeRead:
+    """Stop a family for everybody in it (nothing is lost); see app/core/tenancy.py::is_paused for every door that closes."""
+    return await _set_status(tree_id, "paused", actor, request, db)
+
+
+@router.post("/{tree_id}/resume", response_model=TreeRead)
+async def resume_family(
+    tree_id: int, request: Request, actor: User = Depends(require_superadmin), db: AsyncSession = Depends(get_db)
+) -> TreeRead:
+    return await _set_status(tree_id, "active", actor, request, db)

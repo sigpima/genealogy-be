@@ -21,8 +21,9 @@ async def compute_platform_overview(db: AsyncSession) -> PlatformOverview:
     members = await _scalar(db, select(func.count()).select_from(Member))
     users = await _scalar(db, select(func.count()).select_from(User).where(User.tree_id.is_not(None)))  # the families' accounts, not the platform owner
     media_bytes = await _scalar(db, select(func.coalesce(func.sum(Media.size), 0)))
+    paused = await _scalar(db, select(func.count()).select_from(Tree).where(Tree.status == "paused"))
     with_admin = select(User.tree_id).where(User.role == ROLE_ADMIN, User.status == STATUS_ACTIVE).distinct()
-    without_admin = await _scalar(db, select(func.count()).select_from(Tree).where(Tree.id.not_in(with_admin)))
+    without_admin = await _scalar(db, select(func.count()).select_from(Tree).where(Tree.id.not_in(with_admin), Tree.status == "active"))
     tasks: list[TodoItem] = []
     if without_admin:
         tasks.append(
@@ -34,7 +35,9 @@ async def compute_platform_overview(db: AsyncSession) -> PlatformOverview:
                 kind="task",
             )
         )
+    if paused:
+        tasks.append(TodoItem(key="trees_paused", count=paused, text=f"{paused} họ đang tạm ngưng", href="/he-thong/ho?loc=tam-ngung", kind="task"))
     return PlatformOverview(
         items=tasks,
-        numbers={"trees": trees, "trees_paused": 0, "members": members, "users": users, "media_bytes": media_bytes},
+        numbers={"trees": trees, "trees_paused": paused, "members": members, "users": users, "media_bytes": media_bytes},
     )

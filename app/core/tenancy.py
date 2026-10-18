@@ -32,6 +32,10 @@ class TreeContext:
     user: User | None
 
 
+def is_paused(tree: Tree | None) -> bool:
+    return tree is not None and tree.status == "paused"
+
+
 def _not_found(detail: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
 
@@ -69,11 +73,14 @@ async def public_tree(request: Request, db: AsyncSession, *, ambiguous_status: i
     slug = request.cookies.get(TREE_SLUG_COOKIE)
     if slug:
         tree = await get_tree_by_slug(db, slug)
-        if tree is None:
+        if tree is None or is_paused(tree):
             raise _not_found("tree not found")
         return tree
     count = (await db.execute(select(func.count()).select_from(Tree))).scalar_one()
     if count == 1:
-        return (await db.execute(select(Tree))).scalar_one()
+        only = (await db.execute(select(Tree))).scalar_one()
+        if is_paused(only):
+            raise _not_found("tree not found")
+        return only
     detail = "tree required: open your family's link" if count > 1 else "there is no tree yet"
     raise HTTPException(status_code=ambiguous_status, detail=detail)
