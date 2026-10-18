@@ -13,7 +13,7 @@ KINDS: dict[str, tuple[str, ...]] = {
         "member.", "marriage.", "branch.", "media.", "place.", "article.", "timeline.", "poem.",
         "event.", "card.", "request.", "data.", "book.",
     ),
-    "people": ("user.",),
+    "people": ("user.", "invite."),
     "security": ("security.",),
     "settings": ("settings.", "privacy.", "calendar."),
 }

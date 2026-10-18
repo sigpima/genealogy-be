@@ -30,6 +30,7 @@ from app.core.security import (
     verify_password,
 )
 from app.db.session import get_db
+from app.models.member import Member
 from app.models.password_reset_token import PasswordResetToken
 from app.models.tree import Tree
 from app.models.user import User
@@ -39,6 +40,7 @@ from app.schemas.auth import (
     ResetPasswordRequest,
     TokenResponse,
 )
+from app.schemas.search import PersonRef
 from app.schemas.user import UserCreate, UserRead
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -129,6 +131,22 @@ LOGIN_FAILURE_LIMIT = 8
 LOGIN_FAILURE_WINDOW = 300
 
 
+def set_login_cookie(response: Response, email: str) -> str:
+    """Sign `email` in: the JWT in the httpOnly cookie (also returned, for the login response body)."""
+    token = create_access_token(subject=email)
+    settings = get_settings()
+    response.set_cookie(
+        key=ACCESS_TOKEN_COOKIE,
+        value=token,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        max_age=settings.jwt_expire_minutes * 60,
+        path="/",
+    )
+    return token
+
+
 @router.post("/login", response_model=TokenResponse)
 async def login(
     payload: LoginRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)
@@ -156,18 +174,7 @@ async def login(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="tree_paused")
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
-    token = create_access_token(subject=user.email)
-    settings = get_settings()
-    response.set_cookie(
-        key=ACCESS_TOKEN_COOKIE,
-        value=token,
-        httponly=True,
-        secure=settings.cookie_secure,
-        samesite="lax",
-        max_age=settings.jwt_expire_minutes * 60,
-        path="/",
-    )
-    return TokenResponse(access_token=token)
+    return TokenResponse(access_token=set_login_cookie(response, user.email))
 
 
 @router.post("/logout")
@@ -207,6 +214,10 @@ async def read_current_user(
     if current_user.tree_id is not None:
         tree = await db.get(Tree, current_user.tree_id)
         read.tree_name = tree.name if tree else None
+    if current_user.member_id is not None:
+        person = await db.get(Member, current_user.member_id)
+        if person is not None:
+            read.member = PersonRef(id=person.id, name=person.full_name)
     return read
 
 

@@ -20,6 +20,7 @@ from app.models import (  # noqa: E402,F401  (registers models on Base.metadata)
     marriage,
     media,
     member,
+    member_invite,
     notification,
     password_reset_token,
     place,

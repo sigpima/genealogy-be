@@ -18,6 +18,8 @@ from app.routers.generation_words import router as generation_words_router
 from app.routers.invitations import admin_router as invitations_admin_router
 from app.routers.invitations import public_router as invitations_public_router
 from app.routers.member import router as member_router
+from app.routers.invite_public import router as invite_public_router
+from app.routers.member_invites import router as member_invites_router
 from app.routers.media import router as media_router
 from app.routers.member_search import router as member_search_router
 from app.routers.member_tools import router as member_tools_router
@@ -78,6 +80,8 @@ app.include_router(timeline_router)
 app.include_router(generation_words_router)
 app.include_router(invitations_admin_router)
 app.include_router(invitations_public_router)
+app.include_router(member_invites_router)
+app.include_router(invite_public_router)
 app.include_router(trees_router)
 app.include_router(platform_router)
 app.include_router(uploads_router)
