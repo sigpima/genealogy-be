@@ -23,6 +23,7 @@ from app.models import (  # noqa: E402,F401  (registers models on Base.metadata)
     notification,
     password_reset_token,
     place,
+    platform_event,
     site_setting,
     tree,
     user,

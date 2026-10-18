@@ -23,6 +23,7 @@ from app.routers.member_search import router as member_search_router
 from app.routers.member_tools import router as member_tools_router
 from app.routers.notifications import router as notifications_router
 from app.routers.places import router as places_router
+from app.routers.platform import router as platform_router
 from app.routers.requests import router as requests_router
 from app.routers.timeline import router as timeline_router
 from app.routers.site import router as site_router
@@ -78,6 +79,7 @@ app.include_router(generation_words_router)
 app.include_router(invitations_admin_router)
 app.include_router(invitations_public_router)
 app.include_router(trees_router)
+app.include_router(platform_router)
 app.include_router(uploads_router)
 
 
