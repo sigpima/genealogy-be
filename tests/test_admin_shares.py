@@ -124,3 +124,13 @@ async def test_members_403_and_guests_401(world, make_client):
     for c, code in ((member, 403), (make_client(), 401)):
         assert (await c.get("/admin/shares")).status_code == code
         assert (await c.get("/cards")).status_code == code
+
+
+async def test_calendar_link_actions_leave_audit_lines_without_the_secret(world, make_client):
+    admin = await signed_in(make_client, "admin_a")
+    first = (await admin.post("/calendar/subscription")).json()["path"]
+    second = (await admin.post("/calendar/subscription")).json()["path"]
+    assert (await admin.delete("/calendar/subscription")).status_code == 204
+    rows = await audit(admin, kind="settings")
+    assert [r["action"] for r in rows][::-1] == ["calendar.enable", "calendar.regenerate", "calendar.disable"]
+    assert first.split("/")[-1].split(".")[0] not in str(rows) and second.split("/")[-1].split(".")[0] not in str(rows)

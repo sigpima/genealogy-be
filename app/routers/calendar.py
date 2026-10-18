@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import calendar_items
+from app.core import audit, calendar_items
 from app.core.calendar_items import Item, collect, count_incomplete
 from app.core.ics import build_calendar
 from app.core.lunar import LunarDate, lunar_to_solar, solar_to_lunar
@@ -145,13 +145,17 @@ async def get_subscription(ctx: TreeContext = Depends(get_user_context)) -> Subs
 @router.post("/subscription", response_model=Subscription)
 async def create_subscription(db: AsyncSession = Depends(get_db), ctx: TreeContext = Depends(get_write_context)) -> Subscription:
     """Enable the feed, or replace its token (anyone holding the old link stops receiving updates)."""
+    action = "calendar.regenerate" if ctx.tree.calendar_token else "calendar.enable"
     ctx.tree.calendar_token = secrets.token_urlsafe(24)
+    audit.record(db, tree_id=ctx.tree.id, actor=ctx.user, action=action)  # never the token itself
     await db.commit()
     return _subscription(ctx.tree)
 
 
 @router.delete("/subscription", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_subscription(db: AsyncSession = Depends(get_db), ctx: TreeContext = Depends(get_write_context)) -> None:
+    if ctx.tree.calendar_token is not None:
+        audit.record(db, tree_id=ctx.tree.id, actor=ctx.user, action="calendar.disable")
     ctx.tree.calendar_token = None
     await db.commit()
 

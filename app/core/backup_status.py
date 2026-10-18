@@ -54,7 +54,13 @@ def read_backup_status(directory: Path, now: datetime.datetime, old_after_days: 
         return BackupStatus(state="never")
     for entry in entries:
         stamp = _stamp(entry.name)
-        if stamp is not None and (entry / "database.dump").is_file():
+        if stamp is None:
+            continue
+        try:
+            has_dump = (entry / "database.dump").is_file()
+        except OSError:  # a folder the API user may not enter (e.g. written with umask 077): not one we can report on
+            continue
+        if has_dump:
             found.append((stamp, entry))
     if not found:
         return BackupStatus(state="never")

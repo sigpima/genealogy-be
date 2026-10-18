@@ -15,7 +15,7 @@ KINDS: dict[str, tuple[str, ...]] = {
     ),
     "people": ("user.",),
     "security": ("security.",),
-    "settings": ("settings.", "privacy."),
+    "settings": ("settings.", "privacy.", "calendar."),
 }
 
 

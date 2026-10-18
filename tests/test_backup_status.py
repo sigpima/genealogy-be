@@ -104,3 +104,19 @@ async def test_members_403_and_guests_401(world, make_client):
     assert (await login(member, "member_a@example.com")).status_code == 200
     assert (await member.get("/admin/backup-status")).status_code == 403
     assert (await make_client().get("/admin/backup-status")).status_code == 401
+
+
+def test_an_unreadable_backup_folder_is_ignored_not_a_crash(tmp_path):
+    import os
+
+    if os.geteuid() == 0:
+        pytest.skip("root can read anything")
+    good = backup(tmp_path, "20261016-020000")
+    locked = backup(tmp_path, "20261017-020000")
+    locked.chmod(0o000)  # e.g. written by a root cron with umask 077: the API user cannot even look inside
+    try:
+        status = read_backup_status(tmp_path, NOW)
+    finally:
+        locked.chmod(0o755)
+    assert status.state == "ok" and status.kept == 1 and status.last_at.day == 16
+    assert good.exists()
