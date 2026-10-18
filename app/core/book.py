@@ -165,15 +165,24 @@ def short_years(m: Member) -> str:
     return f"{m.birth_year or '?'} – {m.death_year or ''}".rstrip(" ")
 
 
+_ESCAPABLE = re.compile(r"\\([\\`*_\[\]()#+\-.!>])")
+_PLACEHOLDER_BASE = 0xE000
+
+
 def _inline(text: str) -> str:
-    """A line of Markdown as ReportLab paragraph markup: only **bold** survives, links and images become their text."""
+    """A line of Markdown as ReportLab paragraph markup: only **bold** survives, links and images become their text.
+
+    A backslash before a Markdown character (the chronicle editor writes `\\*` for a typed star) shows it literally: escaped
+    characters are swapped for private-use placeholders while the patterns run and restored at the end."""
+    text = _ESCAPABLE.sub(lambda m: chr(_PLACEHOLDER_BASE + ord(m.group(1))), text)
     text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
     out = escape(text)
     out = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", out)
     out = re.sub(r"__([^_]+)__", r"<b>\1</b>", out)
     out = re.sub(r"(?<!\w)[*_]([^*_\s][^*_]*)[*_](?!\w)", r"\1", out)
-    return re.sub(r"`([^`]+)`", r"\1", out)
+    out = re.sub(r"`([^`]+)`", r"\1", out)
+    return re.sub(r"[\ue000-\ue07f]", lambda m: chr(ord(m.group(0)) - _PLACEHOLDER_BASE), out)
 
 
 def markdown_flowables(body: str, st: dict[str, ParagraphStyle]) -> list[Flowable]:
