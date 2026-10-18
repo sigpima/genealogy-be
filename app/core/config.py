@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     smtp_use_tls: bool = True
     # Operations (GĐ11): see app/core/rate_limit.py. 0 hops = never trust X-Forwarded-For.
+    # Where the host's backups appear inside the container (mounted read-only; see app/core/backup_status.py).
+    backup_dir: str = "/app/backups"
     rate_limit_enabled: bool = True
     trusted_proxy_hops: int = 0
 

@@ -1,3 +1,4 @@
+import datetime
 import secrets
 from dataclasses import asdict
 from pathlib import Path
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import audit, calendar_items
 from app.core.admin_overview import compute_overview
+from app.core.backup_status import BackupStatus, read_backup_status
 from app.core.config import get_settings
 from app.core.data_health import check_layout, check_media
 from app.core.permissions import get_write_context
@@ -282,3 +284,9 @@ async def data_health(ctx: TreeContext = Depends(get_write_context), db: AsyncSe
     for f in found:
         counts[f.kind] = counts.get(f.kind, 0) + 1
     return DataHealth(findings=[FindingRead(**asdict(f)) for f in found], counts=counts)
+
+
+@router.get("/backup-status", response_model=BackupStatus)
+async def backup_status(ctx: TreeContext = Depends(get_write_context)) -> BackupStatus:
+    """When the last backup was made (status only; see app/core/backup_status.py for why there is nothing more)."""
+    return read_backup_status(Path(get_settings().backup_dir), datetime.datetime.now(calendar_items.VN_TIMEZONE))

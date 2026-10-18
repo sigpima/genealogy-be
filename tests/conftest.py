@@ -96,6 +96,15 @@ def _env(monkeypatch, tmp_path):
     monkeypatch.setenv("JWT_SECRET", "test-secret")
     monkeypatch.setenv("JWT_EXPIRE_MINUTES", "60")
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path))
+    # A fresh-looking backup, so the admin overview does not nag about backups in tests that are about something else.
+    import datetime
+
+    from app.core.calendar_items import VN_TIMEZONE
+
+    backups = tmp_path / "backups-for-tests"
+    (backups / f"gia-pha-{datetime.datetime.now(VN_TIMEZONE):%Y%m%d-%H%M%S}").mkdir(parents=True)
+    (next(backups.iterdir()) / "database.dump").write_bytes(b"x")
+    monkeypatch.setenv("BACKUP_DIR", str(backups))
     from app.core.config import get_settings
 
     get_settings.cache_clear()

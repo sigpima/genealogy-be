@@ -10,6 +10,8 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import calendar_items
+from app.core.backup_status import read_backup_status
 from app.core.config import get_settings
 from app.core.data_health import check_layout, check_media
 from app.core.tree_layout import load_layout
@@ -41,11 +43,15 @@ async def compute_overview(db: AsyncSession, tree: Tree, settings: dict[str, str
         for f in [*check_layout(await load_layout(db, tree.id)), *await check_media(db, tree.id, Path(get_settings().upload_dir))]
         if f.severity == "warning"
     ]
+    backup = read_backup_status(Path(get_settings().backup_dir), datetime.datetime.now(calendar_items.VN_TIMEZONE))
     tasks: list[TodoItem] = []
     if pending_users:
         tasks.append(TodoItem(key="pending_users", count=pending_users, text=f"{pending_users} người đăng ký đang chờ duyệt", href="/admin/nguoi-dung?trang-thai=pending", kind="task"))
     if pending_requests:
         tasks.append(TodoItem(key="pending_requests", count=pending_requests, text=f"{pending_requests} yêu cầu chỉnh sửa chờ duyệt", href="/yeu-cau", kind="task"))
+    if backup.state != "ok":
+        text = "Chưa có bản sao lưu nào được ghi nhận" if backup.state == "never" else f"Bản sao lưu gần nhất đã {backup.age_days} ngày trước"
+        tasks.append(TodoItem(key="backup_old", count=1, text=text, href="/admin/sao-luu", kind="task"))
     if issues:
         tasks.append(TodoItem(key="data_issues", count=len(issues), text=f"{len(issues)} chỗ dữ liệu có vẻ sai hoặc vô lý", href="/admin/suc-khoe-du-lieu", kind="task"))
     if locked:
