@@ -210,12 +210,16 @@ async def update_settings(
     ctx: TreeContext = Depends(get_write_context),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
+    before = await get_tree_settings(db, ctx.tree.id)
     for key, value in payload.model_dump().items():
         row = await db.get(SiteSetting, (ctx.tree.id, key))
         if row is None:
             db.add(SiteSetting(tree_id=ctx.tree.id, key=key, value=value))
         else:
             row.value = value
+    changes = audit.diff_values(before, payload.model_dump())
+    if changes:
+        audit.record(db, tree_id=ctx.tree.id, actor=ctx.user, action="settings.update", changes=changes)
     await db.commit()
     return await get_tree_settings(db, ctx.tree.id)
 

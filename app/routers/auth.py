@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.rate_limit import limit_by_ip, limiter
+from app.core.security_events import record_failed_login
 from app.core.email import send_password_reset_email
 from app.core.roles import (
     ROLE_MEMBER,
@@ -111,17 +112,26 @@ async def register(
     return read
 
 
+# Failed logins an account may collect inside the window before it is locked for the rest of it (see rate_limit.py).
+LOGIN_FAILURE_LIMIT = 8
+LOGIN_FAILURE_WINDOW = 300
+
+
 @router.post("/login", response_model=TokenResponse)
 async def login(
     payload: LoginRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)
 ) -> TokenResponse:
     limit_by_ip(request, "login", 20, 300)
     account_key = f"login:account:{payload.email.lower()}"
-    limiter.check(account_key, 8, 300)  # only FAILURES count against an account: guessing from any address stops, the owner is not locked out by their own logins
+    limiter.check(account_key, LOGIN_FAILURE_LIMIT, LOGIN_FAILURE_WINDOW)  # only FAILURES count against an account: guessing from any address stops, the owner is not locked out by their own logins
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
     if user is None or not verify_password(payload.password, user.hashed_password):
         limiter.record(account_key)
+        if user is not None:
+            failures = limiter.count(account_key, LOGIN_FAILURE_WINDOW) if limiter.enabled else 1
+            record_failed_login(db, user, failures, LOGIN_FAILURE_LIMIT)
+            await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials"
         )

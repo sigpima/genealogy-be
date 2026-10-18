@@ -40,6 +40,13 @@ class RateLimiter:
             )
         return hits
 
+    def count(self, key: str, window: float) -> int:
+        """How many attempts `key` made in the last `window` seconds (0 when the limiter is off)."""
+        if not self.enabled:
+            return 0
+        now = self._clock()
+        return sum(1 for t in self._hits.get(key, ()) if t > now - window)
+
     def record(self, key: str) -> None:
         if not self.enabled:
             return
