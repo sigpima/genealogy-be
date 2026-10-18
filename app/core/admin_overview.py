@@ -5,9 +5,14 @@ Items with nothing to do are left out; notices (standing conditions worth knowin
 
 import datetime
 
+from pathlib import Path
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
+from app.core.data_health import check_layout, check_media
+from app.core.tree_layout import load_layout
 from app.models.audit_log import AuditLog
 from app.models.change_request import ChangeRequest
 from app.models.member import Member
@@ -31,11 +36,18 @@ async def compute_overview(db: AsyncSession, tree: Tree, settings: dict[str, str
     locked = await _count(
         db, AuditLog.tree_id == tree.id, AuditLog.action == "security.locked", AuditLog.created_at >= since, model=AuditLog
     )
+    issues = [
+        f
+        for f in [*check_layout(await load_layout(db, tree.id)), *await check_media(db, tree.id, Path(get_settings().upload_dir))]
+        if f.severity == "warning"
+    ]
     tasks: list[TodoItem] = []
     if pending_users:
         tasks.append(TodoItem(key="pending_users", count=pending_users, text=f"{pending_users} người đăng ký đang chờ duyệt", href="/admin/nguoi-dung?trang-thai=pending", kind="task"))
     if pending_requests:
         tasks.append(TodoItem(key="pending_requests", count=pending_requests, text=f"{pending_requests} yêu cầu chỉnh sửa chờ duyệt", href="/yeu-cau", kind="task"))
+    if issues:
+        tasks.append(TodoItem(key="data_issues", count=len(issues), text=f"{len(issues)} chỗ dữ liệu có vẻ sai hoặc vô lý", href="/admin/suc-khoe-du-lieu", kind="task"))
     if locked:
         tasks.append(TodoItem(key="locked_accounts", count=locked, text=f"{locked} lần tài khoản bị khoá tạm vì đăng nhập sai trong 24 giờ qua", href="/admin/nhat-ky?loai=security", kind="task"))
     notices: list[TodoItem] = []

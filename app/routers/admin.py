@@ -1,4 +1,6 @@
 import secrets
+from dataclasses import asdict
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -7,18 +9,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import audit, calendar_items
 from app.core.admin_overview import compute_overview
+from app.core.config import get_settings
+from app.core.data_health import check_layout, check_media
 from app.core.permissions import get_write_context
 from app.core.privacy import KEY_PREFIX, field_levels
 from app.core.roles import ROLE_ADMIN, STATUS_ACTIVE, STATUS_PENDING, get_tree_settings
 from app.core.security import hash_password
 from app.core.tenancy import TreeContext
 from app.core.text import fold
+from app.core.tree_layout import load_layout
 from app.db.session import get_db
 from app.models.event_card import EventCard
 from app.models.member import Member
 from app.models.site_setting import SiteSetting
 from app.models.user import User
 from app.schemas.admin_overview import Overview
+from app.schemas.data_health import DataHealth, FindingRead
 from app.schemas.admin import (
     AdminUserCreate,
     AdminUserRead,
@@ -266,3 +272,13 @@ async def shares(ctx: TreeContext = Depends(get_write_context), db: AsyncSession
     cards = (await db.execute(select(EventCard).where(EventCard.tree_id == ctx.tree.id, EventCard.closed.is_(False)))).scalars().all()
     open_cards = sum(1 for c in cards if c.closes_on is None or calendar_items.vn_today() <= c.closes_on)
     return Shares(calendar=_subscription(ctx.tree), open_cards=open_cards)
+
+
+@router.get("/data-health", response_model=DataHealth)
+async def data_health(ctx: TreeContext = Depends(get_write_context), db: AsyncSession = Depends(get_db)) -> DataHealth:
+    """Probable typos in this tree's data: impossible or odd dates, likely duplicates, media files missing on disk."""
+    found = [*check_layout(await load_layout(db, ctx.tree.id)), *await check_media(db, ctx.tree.id, Path(get_settings().upload_dir))]
+    counts: dict[str, int] = {}
+    for f in found:
+        counts[f.kind] = counts.get(f.kind, 0) + 1
+    return DataHealth(findings=[FindingRead(**asdict(f)) for f in found], counts=counts)
