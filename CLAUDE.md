@@ -477,4 +477,8 @@ and exactly one `security.locked` when the limit is hit; unknown emails, superad
 `ancestor_gap_undated` (info: no birth year above a dated descendant; a tree with no dates is silent); `check_media(db, tree_id, upload_dir)` flags `media_file_missing` and `media_orphan` (info). Read-only: nothing is fixed. The overview's `data_issues` counts warnings only.
 Tests that insert `Member`/`Media` rows through the ORM must import `app.models.place` and `app.models.article` (metadata registration gotcha).
 
+**Backup status (admin console phase 5)** — `GET /admin/backup-status` (`app/core/backup_status.py`) reads the host's `./backups/` (mounted **read-only** at `BACKUP_DIR=/app/backups`; `BACKUP_HOST_DIR` on the host side) and reports only
+`{state never|ok|old (≥ 7 days), last_at, age_days, size_bytes, kept}` for the newest `gia-pha-YYYYmmdd-HHMMSS/` folder that has `database.dump` (read as Vietnam time). **Deliberately no download, no trigger and no member count**: a backup holds every family's data. Overview item
+`backup_old` appears for `never`/`old`. `tests/conftest.py` points `BACKUP_DIR` at a fresh-looking backup so unrelated tests are not nagged. Create `./backups` yourself before `docker compose up` (Docker would create it root-owned and `scripts/backup.sh` could not write).
+
 `GET /health` (public, no DB access) is the container healthcheck target.
