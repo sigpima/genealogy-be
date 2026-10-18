@@ -481,4 +481,7 @@ Tests that insert `Member`/`Media` rows through the ORM must import `app.models.
 `{state never|ok|old (≥ 7 days), last_at, age_days, size_bytes, kept}` for the newest `gia-pha-YYYYmmdd-HHMMSS/` folder that has `database.dump` (read as Vietnam time). **Deliberately no download, no trigger and no member count**: a backup holds every family's data. Overview item
 `backup_old` appears for `never`/`old`. `tests/conftest.py` points `BACKUP_DIR` at a fresh-looking backup so unrelated tests are not nagged. Create `./backups` yourself before `docker compose up` (Docker would create it root-owned and `scripts/backup.sh` could not write).
 
+**Bootstrap code (first superadmin)** — the first registration while `users` is empty becomes the superadmin; when `BOOTSTRAP_CODE` is set it must carry the same `bootstrap_code` (constant-time compare; a refusal is 403 and writes nothing, no tree, no user), so a stranger cannot claim a freshly deployed site.
+Unset = open (dev). `GET /auth/bootstrap` (public) → `{first_user, needs_code}` (never the code); the web signup page uses it, because on a fresh install there is no tree and `/site/info` answers 404.
+
 `GET /health` (public, no DB access) is the container healthcheck target.
