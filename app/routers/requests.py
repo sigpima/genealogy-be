@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import audit
 from app.core.config import get_settings
+from app.core.member_rules import check_adoption
 from app.core.email import send_email
 from app.core.permissions import get_user_context, get_write_context
 from app.core.privacy import privacy_for
@@ -214,6 +215,10 @@ async def create_request(
             raise _unprocessable("nothing was proposed")
         current = member_values(member)
         checked = _validate(MemberUpdate, {**current, **payload.changes})
+        try:
+            check_adoption(checked.parent_id, checked.is_adopted, existing=member)
+        except HTTPException:
+            raise _unprocessable("a person without a father cannot be adopted") from None
         for field_name in payload.changes:
             new = _plain(getattr(checked, field_name))
             if new != current[field_name]:

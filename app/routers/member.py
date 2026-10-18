@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import audit
 from app.core.config import get_settings
+from app.core.member_rules import check_adoption
 from app.db.session import get_db
 from app.models.marriage import Marriage
 from app.models.media import Media
@@ -364,6 +365,7 @@ async def add_member(
     db: AsyncSession, ctx: TreeContext, payload: MemberCreate, *, request_id: int | None = None
 ) -> Member:
     """Insert a member and its audit entry into the caller's transaction (the caller commits)."""
+    check_adoption(payload.parent_id, payload.is_adopted)
     await check_place(db, ctx.tree.id, payload.burial_place_id)
     member = Member(tree_id=ctx.tree.id)
     _assign(member, payload)
@@ -399,6 +401,7 @@ async def _apply_update(
                 detail="cannot set parent to one of the member's own descendants",
             )
     await _check_mother(db, payload.parent_id, payload.mother_id)
+    check_adoption(payload.parent_id, payload.is_adopted, existing=member)
     await check_place(db, ctx.tree.id, payload.burial_place_id)
 
     before = member_values(member)

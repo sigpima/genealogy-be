@@ -117,6 +117,8 @@ class Completeness(BaseModel):
     with_birth_year: int
     with_hometown: int
     basic: int  # gender and birth year both known
+    with_death_year: int
+    with_avatar: int
 
 
 @router.get("/completeness", response_model=Completeness)
@@ -131,6 +133,8 @@ async def completeness(
         with_birth_year=sum(m.birth_year is not None for m in members),
         with_hometown=sum(m.hometown is not None for m in members),
         basic=sum(m.gender is not None and m.birth_year is not None for m in members),
+        with_death_year=sum(m.death_year is not None for m in members),
+        with_avatar=sum(m.avatar_url is not None for m in members),
     )
 
 
@@ -387,6 +391,9 @@ async def import_csv(
                 if cyclic:
                     fail("parent_id would make the member their own ancestor")
                     continue
+        if payload.is_adopted and parent_id is None and not (member is not None and member.is_adopted and member.parent_id is None):
+            fail("is_adopted: a person without a father cannot be adopted")
+            continue
         if payload.mother_id is not None and (parent_id, payload.mother_id) not in spouse_pairs:
             fail("mother_id must be a recorded spouse of the father (parent_id)")
             continue
