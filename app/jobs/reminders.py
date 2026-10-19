@@ -16,6 +16,7 @@ from app.core import calendar_items
 from app.core.calendar_items import Item, collect
 from app.core.config import get_settings
 from app.core.email import send_email
+from app.core.retention import prune_notifications
 from app.core.roles import STATUS_ACTIVE
 from app.core.system_health import set_state
 from app.models.event import Event
@@ -90,6 +91,7 @@ async def send_due_reminders(db: AsyncSession, today: date | None = None) -> dic
                         except Exception:  # noqa: BLE001 - the in-web notification already exists; a mail failure only costs the email
                             logger.warning("could not email reminder to %s", user.email, exc_info=True)
         await db.commit()
+    await prune_notifications(db)  # old read reminders only; cheap and safe to repeat every pass
     await set_state(db, "reminders.last_run", datetime.now(timezone.utc).isoformat())  # once per pass, even when there was nothing to remind about
     await db.commit()
     return {"notifications": created, "emails": emailed}

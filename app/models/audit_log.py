@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,6 +13,7 @@ class AuditLog(Base):
     on purpose: the entries of a deleted person must survive (with `member_name` as the record of who it was)."""
 
     __tablename__ = "audit_log"
+    __table_args__ = (Index("ix_audit_log_tree_id_id", "tree_id", "id"),)  # the log page: newest first within one family
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tree_id: Mapped[int] = mapped_column(ForeignKey("trees.id"), index=True, nullable=False)

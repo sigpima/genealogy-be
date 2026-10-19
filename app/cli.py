@@ -14,6 +14,7 @@ import secrets
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.retention import prune_audit, prune_notifications
 from app.core.roles import ROLES
 from app.core.security import hash_password
 from app.core.tenants import (
@@ -62,6 +63,10 @@ def _build_parser() -> argparse.ArgumentParser:
     pw.add_argument("--email", required=True)
     pw.add_argument("--password", help="omit to generate one (it is then printed once)")
 
+    prune = sub.add_parser("prune", help="delete old rows: read notifications and, only if you ask, old audit-log entries")
+    prune.add_argument("--notifications-days", type=int, help="delete notifications read more than N days ago (and any older than a year)")
+    prune.add_argument("--audit-days", type=int, help="delete audit-log entries older than N days (N >= 1; this is history, think first)")
+
     sub.add_parser("list", help="list trees and users")
     return parser
 
@@ -99,6 +104,17 @@ async def run(argv: list[str], db: AsyncSession) -> str:
             tree = await _tree_arg(db, args.tree)
             user = await set_user_role(db, args.email, args.role, tree)
             return f"{user.email} is now {user.role}" + (f" of tree {tree.slug}" if tree else " (platform level)")
+        if args.command == "prune":
+            if args.notifications_days is None and args.audit_days is None:
+                raise TenantError("say what to prune: --notifications-days N and/or --audit-days N")
+            lines = []
+            if args.notifications_days is not None:
+                lines.append(f"notifications deleted: {await prune_notifications(db, read_days=args.notifications_days)}")
+            if args.audit_days is not None:
+                if args.audit_days < 1:
+                    raise TenantError("--audit-days must be at least 1")
+                lines.append(f"audit entries deleted: {await prune_audit(db, days=args.audit_days)}")
+            return "\n".join(lines)
         if args.command == "set-password":
             user = (await db.execute(select(User).where(User.email == args.email))).scalar_one_or_none()
             if user is None:
