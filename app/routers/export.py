@@ -11,6 +11,7 @@ from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import audit
+from app.core.gedcom import build_gedcom
 from app.core.permissions import get_write_context
 from app.core.privacy import field_levels
 from app.core.tenancy import TreeContext
@@ -92,4 +93,28 @@ async def export_data(
         content=body,
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="gia-pha-{ctx.tree.slug}-data.json"'},
+    )
+
+
+@router.get("/data.ged")
+async def export_gedcom(db: AsyncSession = Depends(get_db), ctx: TreeContext = Depends(get_write_context)) -> Response:
+    """The people and families as GEDCOM 5.5.1, to open in other genealogy programs (see ``app/core/gedcom.py`` for the mapping)."""
+    tree_id = ctx.tree.id
+    members = await _all(db, select(Member).where(Member.tree_id == tree_id).order_by(Member.id))
+    ids = [m.id for m in members]
+    marriages = await _all(db, select(Marriage).where(Marriage.member_id.in_(ids)).order_by(Marriage.id))
+    places = {p.id: p for p in await _all(db, select(Place).where(Place.tree_id == tree_id))}
+    text = build_gedcom(
+        tree_name=ctx.tree.name,
+        members=members,
+        marriages=marriages,
+        places=places,
+        exported_at=datetime.datetime.now(datetime.timezone.utc),
+    )
+    audit.record(db, tree_id=tree_id, actor=ctx.user, action="data.export_gedcom", details={"members": len(members)})
+    await db.commit()
+    return Response(
+        content=text,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="gia-pha-{ctx.tree.slug}.ged"'},
     )

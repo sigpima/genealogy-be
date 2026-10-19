@@ -456,7 +456,7 @@ relatives and in-law terms beyond a short table are out of scope — the mother 
 **Operations (GĐ11)** — `app/core/rate_limit.py` (in-memory sliding windows, per process): login 20/5 min per address + **8 failures/5 min per account**, invitation links 30/5 min, forgot-password 5/h,
 public RSVP 40/10 min; 429 + `Retry-After`. **Measured:** Next.js's `/api` proxy does not forward the visitor's address, so unless `TRUSTED_PROXY_HOPS` says a real reverse proxy
 overwrites `X-Forwarded-For` the "address" is the web container for everybody and the per-address limits are loosened ×5 (`SHARED_ADDRESS_FACTOR`). Tests switch the limiter off in
-`conftest.py` (`limiter.enabled`) — turn it on with the `on` fixture in `tests/test_rate_limit.py`. Security headers come from a middleware in `app/main.py`. `GET /export/data.json` (admin, audited
+`conftest.py` (`limiter.enabled`) — turn it on with the `on` fixture in `tests/test_rate_limit.py`. Security headers come from a middleware in `app/main.py`. `GET /export/data.ged` (admin, audited as `data.export_gedcom`) is GEDCOM 5.5.1 built by the pure `app/core/gedcom.py` (`build_gedcom`; mapping and what is not carried are in its docstring; `tests/test_gedcom.py`) — export only, there is no import. `GET /export/data.json` (admin, audited
 `data.export`) dumps the tree's tables **without credentials or tokens** (`SECRET_COLUMNS`). Backups are `scripts/backup.sh` / `scripts/restore.sh` at the repo root (see `docs/SAO-LUU.md`).
 
 **Admin console (design: `docs/superpowers/specs/2026-10-18-admin-console-design.md`, plan: `docs/superpowers/plans/2026-10-18-admin-console.md`)** — `GET /admin/overview`
