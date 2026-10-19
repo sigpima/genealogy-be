@@ -9,6 +9,8 @@ class AuditEntry(BaseModel):
     action: str
     actor_id: int | None
     actor_name: str
+    #: the actor's role now ("superadmin" = the platform owner acting inside this family); None when the account was deleted
+    actor_role: str | None = None
     member_id: int | None
     member_name: str | None
     changes: dict[str, list[Any]] | None
@@ -20,3 +22,9 @@ class AuditEntry(BaseModel):
 class AuditPage(BaseModel):
     total: int
     items: list[AuditEntry]
+
+
+class AuditActor(BaseModel):
+    id: int
+    name: str
+    role: str

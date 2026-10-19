@@ -77,33 +77,14 @@ def use_backup_dir(monkeypatch, directory):
     get_settings.cache_clear()
 
 
-async def test_the_endpoint_reports_status_without_whole_database_numbers(world, make_client, monkeypatch, tmp_path):
-    use_backup_dir(monkeypatch, tmp_path)
-    backup(tmp_path, f"{datetime.datetime.now(VN_TIMEZONE):%Y%m%d-%H%M%S}")
-    (tmp_path / "gia-pha-20200101-000000").mkdir()
-    admin = make_client()
-    assert (await login(admin, "admin_a@example.com")).status_code == 200
-    body = (await admin.get("/admin/backup-status")).json()
-    assert body["state"] == "ok" and body["kept"] == 1 and body["age_days"] == 0
-    assert set(body) == {"state", "last_at", "age_days", "size_bytes", "kept"}  # no members count, no names, no paths
-
-
-async def test_the_overview_asks_for_a_backup_when_there_is_none_or_it_is_old(world, make_client, monkeypatch, tmp_path):
+async def test_backups_are_the_server_owners_business_not_a_family_admins(world, make_client, monkeypatch, tmp_path):
+    """A backup holds every family's data, so a family admin neither sees its status nor is nagged about it."""
     use_backup_dir(monkeypatch, tmp_path)
     admin = make_client()
     assert (await login(admin, "admin_a@example.com")).status_code == 200
-    items = {i["key"]: i for i in (await admin.get("/admin/overview")).json()["items"]}
-    assert items["backup_old"]["kind"] == "task" and items["backup_old"]["href"] == "/admin/sao-luu"
-    backup(tmp_path, f"{datetime.datetime.now(VN_TIMEZONE):%Y%m%d-%H%M%S}")
-    items = {i["key"]: i for i in (await admin.get("/admin/overview")).json()["items"]}
-    assert "backup_old" not in items
-
-
-async def test_members_403_and_guests_401(world, make_client):
-    member = make_client()
-    assert (await login(member, "member_a@example.com")).status_code == 200
-    assert (await member.get("/admin/backup-status")).status_code == 403
-    assert (await make_client().get("/admin/backup-status")).status_code == 401
+    assert (await admin.get("/admin/backup-status")).status_code == 404
+    items = {i["key"] for i in (await admin.get("/admin/overview")).json()["items"]}
+    assert "backup_old" not in items  # no backup exists in this folder, and still no task
 
 
 def test_an_unreadable_backup_folder_is_ignored_not_a_crash(tmp_path):

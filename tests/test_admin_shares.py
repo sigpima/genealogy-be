@@ -82,7 +82,7 @@ async def test_the_overview_counts_recent_lockouts_only(world, make_client, sess
         limiter.reset()
     admin = await signed_in(make_client, "admin_a")
     items = {i["key"]: i for i in (await admin.get("/admin/overview")).json()["items"]}
-    assert items["locked_accounts"]["count"] == 1 and items["locked_accounts"]["href"] == "/admin/nhat-ky?loai=security"
+    assert items["locked_accounts"]["count"] == 1 and items["locked_accounts"]["href"] == "/nhat-ky?loai=security"
     await session.execute(__import__("sqlalchemy").text("UPDATE audit_log SET created_at = now() - interval '2 days' WHERE action = 'security.locked'"))
     await session.commit()
     items = {i["key"]: i for i in (await admin.get("/admin/overview")).json()["items"]}
