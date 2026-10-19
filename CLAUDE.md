@@ -320,8 +320,8 @@ entity directly from `/auth/register`, leaking the password hash in the
 response body.
 
 **Auth flow (`app/routers/auth.py`):** `hash_password`/`verify_password`
-(passlib+bcrypt) and `create_access_token`/`decode_access_token`
-(python-jose, HS256) live in `app/core/security.py`, independent of the
+(`bcrypt` directly) and `create_access_token`/`decode_access_token`
+(`PyJWT`, HS256) live in `app/core/security.py`, independent of the
 router. `POST /auth/login` returns the token in the JSON body **and**
 sets it as an httpOnly `access_token` cookie (`SameSite=Lax`, `Secure`
 gated by `Settings.cookie_secure`) — the cookie is for the browser
@@ -330,9 +330,10 @@ frontend, the JSON body stays for non-browser API callers/tests.
 `Authorization: Bearer` header; `get_current_user` (used by `GET
 /auth/me`) depends on it, decoding via `decode_access_token` and catching
 `InvalidTokenError` to return 401. `POST /auth/logout` clears the cookie.
-Note the pinned versions in `pyproject.toml`: `passlib==1.7.4` +
-`bcrypt==4.0.1` — bcrypt >=4.1 removed an attribute passlib 1.7.4 reads,
-so don't bump `bcrypt` alone without also moving off passlib.
+Since 20/10 there is no passlib and no python-jose (both unmaintained; passlib forced `bcrypt==4.0.1`): `bcrypt` and `PyJWT` are used directly.
+Compatibility is pinned by golden-master tests in `tests/test_security.py` — a passlib hash, a hash of a >72-byte password and a python-jose token are
+baked into the file and must keep working (nobody is logged out or locked out by an upgrade). `hash_password` cuts at bcrypt's 72 bytes itself (bcrypt >= 5
+refuses longer input), `verify_password` returns False for a malformed hash, `decode_access_token` requires `exp` and a non-empty `sub` and never accepts `alg: none`.
 
 **Multi-family trees, roles and account status (designs: `docs/superpowers/specs/2026-10-17-roles-and-admin-design.md`
 and `...-multi-tree-design.md`)** — one deployment hosts many families. `trees(id, name, slug)`;
