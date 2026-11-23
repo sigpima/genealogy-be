@@ -2,8 +2,8 @@
 
 FROM python:3.12-slim AS builder
 
-# Pull the uv binary from its official image rather than installing via pip.
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+# Pull the uv binary from its official image (pinned: the version that produced uv.lock) rather than installing via pip.
+COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
