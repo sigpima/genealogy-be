@@ -17,6 +17,16 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # CI không có file .env: một số module test import app.core.rate_limit (đọc Settings ngay lúc import) nên cần đủ
+      # biến từ đầu. Trỏ vào Postgres test bên dưới (conftest từ chối DB có tên không kết thúc bằng _test).
+      JWT_SECRET: test-secret
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "55432"
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: genealogy_test
+      UV_PYTHON: "3.12"          # khớp image prod (python:3.12-slim); không để uv chọn bản mới nhất (đã chạy ra 3.14)
     services:
       # Cùng cấu hình với service db-test trong docker-compose.yml (tests/conftest.py mặc định nối 127.0.0.1:55432/genealogy_test).
       postgres:
