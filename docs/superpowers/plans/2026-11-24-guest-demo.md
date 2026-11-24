@@ -43,7 +43,7 @@
   - dataclass `DemoFamily(people, branches, articles, timeline, poem, events)` (mỗi trường là list của dataclass tương ứng).
   - `build_demo_family(seed: int = DEMO_SEED) -> DemoFamily`.
 
-- [ ] **Step 1: Viết test thất bại** trong `tests/test_demo_data.py` (thuần Python, không cần DB):
+- [ ] **Step 1: Viết test thất bại** trong `tests/test_demo_data.py` (hàm sinh là thuần, nhưng `tests/conftest.py` dựng lại database test cho mọi file test nên vẫn cần `db-test` đang chạy và không được chạy song song với pytest khác):
   - `test_build_is_deterministic`: hai lần gọi cùng seed cho `==` (dataclass so sánh được); seed khác cho tên khác.
   - `test_shape_matches_the_spec`: người huyết thống (`partner_key is None`) có 90 ≤ số ≤ 130 và `max(generation) == 6`; có đúng 1 gốc (`parent_key is None` trong nhóm huyết thống); 3 chi phái, mỗi chi có `head_key` thuộc đời 2; 4 bài sử ký trong đó đúng 1 `status == "draft"` và có một bài `kind == "precepts"`; `len(poem) == 6`; ít nhất 5 mục dòng thời gian; ít nhất 3 sự kiện, mọi sự kiện `repeats_yearly` (không để sự kiện một lần sẽ hết hạn).
   - `test_nothing_personal`: mọi `DemoPerson` không có trường điện thoại/email (dataclass không có), và `hometown` chỉ nằm trong danh sách địa danh cố định của module.

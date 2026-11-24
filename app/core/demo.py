@@ -253,7 +253,7 @@ def _generate(rng: random.Random) -> list[DemoPerson]:
             son.generation,
             son.birth_year - rng.randint(0, 5),
             partner_key=son.key,
-            marriage_year=son.birth_year + rng.randint(20, 30),
+            marriage_year=son.birth_year + rng.randint(18, 21),  # before the first child (born at least 22 years after the father)
         )
 
     root = add(names.male(), "male", 1, _ROOT_BIRTH_YEAR)

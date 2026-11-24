@@ -1,4 +1,5 @@
-"""The fake family behind the /guest demo: pure data, no database (see app/core/demo.py)."""
+"""The fake family behind the /guest demo (see app/core/demo.py). The generator is pure, but tests/conftest.py rebuilds the test
+database for every test file, so even this one needs `docker compose up -d --wait db-test` and must not run beside another pytest."""
 
 import dataclasses
 
@@ -79,3 +80,11 @@ def test_keys_are_unique_and_parents_come_first():
         for ref in (person.parent_key, person.partner_key):
             assert ref is None or ref in seen, person.name
         seen.add(person.key)
+
+
+def test_children_are_born_after_the_marriage():
+    family = build_demo_family()
+    marriage_year = {p.partner_key: p.marriage_year for p in family.people if p.partner_key is not None}
+    for person in family.people:
+        if person.parent_key in marriage_year:
+            assert person.birth_year >= marriage_year[person.parent_key], person.name
