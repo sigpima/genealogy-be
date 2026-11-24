@@ -9,6 +9,20 @@ import random
 from dataclasses import dataclass
 from itertools import count
 
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.tenants import get_tree_by_slug
+from app.core.tree_removal import delete_tree_data
+from app.models.article import Article, GenerationWord, TimelineEntry
+from app.models.branch import Branch
+from app.models.event import Event
+from app.models.marriage import Marriage
+from app.models.member import Member
+from app.models.site_setting import SiteSetting
+from app.models.tree import Tree
+from app.models.user import User
+
 DEMO_SLUG = "demo"
 DEMO_NAME = "Họ Demo (dữ liệu giả)"
 DEMO_SEED = 20261124
@@ -282,3 +296,106 @@ def build_demo_family(seed: int = DEMO_SEED) -> DemoFamily:
     root_sons = [p for p in people if p.parent_key == people[0].key and p.gender == "male"][:3]
     branches = [DemoBranch(son.key, name, color) for son, (name, color) in zip(root_sons, _BRANCHES, strict=True)]
     return DemoFamily(people, branches, list(_ARTICLES), list(_TIMELINE), list(_POEM), list(_EVENTS))
+
+
+class DemoGuardError(RuntimeError):
+    """The tree with slug 'demo' is not the demo (it has accounts, or another name): it is left alone."""
+
+
+@dataclass(frozen=True)
+class DemoSummary:
+    tree_id: int
+    members: int  # blood members
+    spouses: int
+    articles: int
+
+
+async def _check_replaceable(db: AsyncSession, tree: Tree) -> None:
+    if tree.name != DEMO_NAME:
+        raise DemoGuardError(f"the tree with slug {DEMO_SLUG!r} is called {tree.name!r}, not {DEMO_NAME!r}: refusing to replace it")
+    accounts = (await db.execute(select(func.count()).select_from(User).where(User.tree_id == tree.id))).scalar_one()
+    if accounts:
+        raise DemoGuardError(f"the tree with slug {DEMO_SLUG!r} has {accounts} account(s): it is a real family, refusing to replace it")
+
+
+async def _insert_family(db: AsyncSession, tree: Tree, family: DemoFamily) -> DemoSummary:
+    from app.routers.articles import make_slug  # here, not at the top: routers import the app settings
+
+    ids: dict[int, int] = {}
+    for person in family.people:
+        member = Member(
+            tree_id=tree.id,
+            full_name=person.name,
+            gender=person.gender,
+            parent_id=ids[person.parent_key] if person.parent_key is not None else None,
+            birth_year=person.birth_year,
+            birth_month=person.birth_month,
+            birth_day=person.birth_day,
+            death_year=person.death_year,
+            death_month=person.death_month,
+            death_day=person.death_day,
+            hometown=person.hometown,
+        )
+        db.add(member)
+        await db.flush()
+        ids[person.key] = member.id
+        if person.partner_key is not None:
+            db.add(Marriage(member_id=ids[person.partner_key], spouse_id=member.id, marriage_year=person.marriage_year))
+    for branch in family.branches:
+        db.add(Branch(tree_id=tree.id, name=branch.name, color=branch.color, root_member_id=ids[branch.head_key]))
+    used_slugs: set[str] = set()
+    for position, art in enumerate(family.articles):
+        slug, n = make_slug(art.title), 2
+        while slug in used_slugs:
+            slug, n = f"{make_slug(art.title)}-{n}", n + 1
+        used_slugs.add(slug)
+        db.add(Article(tree_id=tree.id, title=art.title, slug=slug, kind=art.kind, body=art.body, status=art.status, pinned=art.pinned, position=position))
+    for entry in family.timeline:
+        db.add(TimelineEntry(tree_id=tree.id, year=entry.year, month=entry.month, day=entry.day, title=entry.title, body=entry.body))
+    for word in family.poem:
+        db.add(GenerationWord(tree_id=tree.id, generation=word.generation, word=word.word, meaning=word.meaning))
+    for event in family.events:
+        db.add(
+            Event(
+                tree_id=tree.id,
+                title=event.title,
+                description=event.description,
+                kind=event.kind,
+                calendar=event.calendar,
+                year=None,
+                month=event.month,
+                day=event.day,
+                repeats_yearly=event.repeats_yearly,
+            )
+        )
+    db.add(SiteSetting(tree_id=tree.id, key="visibility", value="public"))
+    await db.flush()
+    spouses = sum(1 for p in family.people if p.partner_key is not None)
+    return DemoSummary(tree.id, len(family.people) - spouses, spouses, len(family.articles))
+
+
+async def reset_demo(db: AsyncSession, family: DemoFamily | None = None) -> DemoSummary:
+    """Make the demo tree (slug 'demo'), replacing the old one. Touches no other tree; all or nothing.
+
+    The only tree this ever deletes is the one whose slug is DEMO_SLUG *and* whose name is DEMO_NAME *and* that has no
+    accounts. Anything else with that slug raises DemoGuardError and nothing changes.
+    """
+    family = family if family is not None else build_demo_family()
+    removal = None
+    try:
+        existing = await get_tree_by_slug(db, DEMO_SLUG)
+        if existing is not None:
+            await _check_replaceable(db, existing)
+            removal = await delete_tree_data(db, existing)
+            await db.flush()
+        tree = Tree(name=DEMO_NAME, slug=DEMO_SLUG)
+        db.add(tree)
+        await db.flush()
+        summary = await _insert_family(db, tree, family)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    if removal is not None:
+        removal.unlink()  # the demo has no photos; this only matters if someone attached some
+    return summary
