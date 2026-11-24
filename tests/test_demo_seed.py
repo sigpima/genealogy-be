@@ -169,3 +169,17 @@ async def test_generated_data_has_no_data_health_warnings(session):
     summary = await reset_demo(session)
     findings = check_layout(await load_layout(session, summary.tree_id))
     assert [f for f in findings if f.severity == "warning"] == []
+
+
+async def test_demo_tree_is_not_a_tree_without_admin(session):
+    from app.core.platform_overview import compute_platform_overview
+
+    await reset_demo(session)
+    overview = await compute_platform_overview(session)
+    assert "trees_without_admin" not in [item.key for item in overview.items]
+    assert overview.numbers["trees"] == 1  # still counted: the demo is a tree, the spec says so
+
+    await create_tree(session, "Họ thật", "ho-that")
+    overview = await compute_platform_overview(session)
+    item = next(i for i in overview.items if i.key == "trees_without_admin")
+    assert item.count == 1

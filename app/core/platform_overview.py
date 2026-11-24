@@ -11,6 +11,7 @@ from app.core.backup_status import read_backup_status
 from app.core.config import get_settings
 from app.core.roles import ROLE_ADMIN, STATUS_ACTIVE
 from app.core.system_health import LOW_DISK_PERCENT, disk_health, worker_health
+from app.core.demo import DEMO_SLUG
 from app.models.media import Media
 from app.models.member import Member
 from app.models.tree import Tree
@@ -30,7 +31,7 @@ async def compute_platform_overview(db: AsyncSession) -> PlatformOverview:
     media_bytes = await _scalar(db, select(func.coalesce(func.sum(Media.size), 0)))
     paused = await _scalar(db, select(func.count()).select_from(Tree).where(Tree.status == "paused"))
     with_admin = select(User.tree_id).where(User.role == ROLE_ADMIN, User.status == STATUS_ACTIVE).distinct()
-    without_admin = await _scalar(db, select(func.count()).select_from(Tree).where(Tree.id.not_in(with_admin), Tree.status == "active"))
+    without_admin = await _scalar(db, select(func.count()).select_from(Tree).where(Tree.id.not_in(with_admin), Tree.status == "active", Tree.slug != DEMO_SLUG))  # the demo family has no accounts by design
     tasks: list[TodoItem] = []
     if without_admin:
         tasks.append(
